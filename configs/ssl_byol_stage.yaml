@@ -2,7 +2,7 @@ data:
   csv_paths:
     - data-curation/metadata_public.csv
     - data-curation/metadata_hospital_all.csv
-  root_dir: .
+  root_dir: /content/drive/MyDrive/EMBRYO_CLASSIFICATION/stage_aware_ssl_ivf/data/embyro_public_dataset
   img_size: 224
   batch_size: 128
   num_workers: 2
