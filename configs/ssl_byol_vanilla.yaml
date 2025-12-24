@@ -19,7 +19,7 @@ ssl:
   ema_tau: 0.996
   lr: 0.001
   weight_decay: 1.0e-6
-  epochs: 200
+  epochs: 100
   warmup_epochs: 10
   optimizer: adamw
   scheduler: cosine
