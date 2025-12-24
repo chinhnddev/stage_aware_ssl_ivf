@@ -16,6 +16,13 @@ from torch.utils.data import DataLoader
 import yaml
 from tqdm import tqdm
 
+import sys
+
+# Ensure repo root on path
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from src.data.supervised_dataloader import create_supervised_loaders
 from src.models.classifier import (
     EmbryoClassifier,
