@@ -69,10 +69,18 @@ class IVFSSLDataset(Dataset):
             if self.root_map is not None:
                 if domain not in self.root_map:
                     raise KeyError(f"domain '{domain}' not found in root_map keys={list(self.root_map.keys())}")
-                return self.root_map[domain] / str(image_path)
+                base_path = self.root_map[domain] / str(image_path)
             if self.root_dir is None:
                 raise ValueError("Either root_dir or root_map must be provided.")
-            return self.root_dir / str(image_path)
+            else:
+                base_path = self.root_dir / str(image_path)
+
+            # Try case-insensitive fallback (e.g., ED1 vs ed1 on Linux).
+            if not base_path.exists() and isinstance(domain, str) and domain.lower() == "hospital":
+                lower_path = Path(*[p.lower() for p in base_path.parts])
+                if lower_path.exists():
+                    return lower_path
+            return base_path
 
         df["abs_path"] = df.apply(
             lambda r: _resolve_image_path(r["image_path"], r["domain"] if "domain" in r else None), axis=1
