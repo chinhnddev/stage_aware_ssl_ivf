@@ -86,7 +86,13 @@ class IVFClassifDataset(Dataset):
                 break
         if label_col is None:
             raise KeyError("No label column found. Expected one of: unified_label, label_id, label")
-        self.labels: List[float] = df[label_col].astype(float).tolist()
+        labels_series = pd.to_numeric(df[label_col], errors="coerce")
+        labels_series = labels_series.fillna(0)
+        # If multi-class, binarize: everything > min label is positive
+        if labels_series.nunique() > 2:
+            min_label = labels_series.min()
+            labels_series = (labels_series > min_label).astype(float)
+        self.labels = labels_series.astype(float).tolist()
         self.paths: List[Path] = df["abs_path"].tolist()
 
     def __len__(self) -> int:

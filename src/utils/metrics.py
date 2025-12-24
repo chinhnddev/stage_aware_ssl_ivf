@@ -12,6 +12,20 @@ from sklearn import metrics
 
 def compute_classification_metrics(y_true: np.ndarray, y_score: np.ndarray, threshold: float = 0.5) -> Dict:
     y_true = y_true.astype(int)
+    # handle degenerate cases: single class
+    if np.unique(y_true).size <= 1:
+        return {
+            "auroc": 0.0,
+            "auprc": 0.0,
+            "f1": 0.0,
+            "acc": 0.0,
+            "bal_acc": 0.0,
+            "tp": 0,
+            "fp": 0,
+            "tn": int((y_true == 0).sum()),
+            "fn": int((y_true == 1).sum()),
+            "threshold": threshold,
+        }
     auroc = metrics.roc_auc_score(y_true, y_score)
     auprc = metrics.average_precision_score(y_true, y_score)
     y_pred = (y_score >= threshold).astype(int)
