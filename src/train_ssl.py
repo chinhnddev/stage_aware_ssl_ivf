@@ -38,7 +38,7 @@ def build_transforms(img_size: int) -> transforms.Compose:
             transforms.RandomVerticalFlip(),
             transforms.RandomRotation(30),
             transforms.ColorJitter(0.05, 0.05, 0.05, 0.02),
-            transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 0.5)),
+            transforms.GaussianBlur(kernel_size=3, sigma=(0.05, 0.3)),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ]
@@ -69,6 +69,7 @@ def create_dataloader(cfg: Dict) -> DataLoader:
         shuffle=True,
         num_workers=data_cfg["num_workers"],
         pin_memory=True,
+        persistent_workers=True,
         drop_last=True,
     )
     return loader
