@@ -40,9 +40,10 @@ class IVFClassifDataset(Dataset):
         if len(df) == 0:
             raise ValueError(f"No samples for split={split} domain={use_domain} in {csv_path}")
 
-        def resolve(image_path: str, domain: Optional[str]) -> Path:
+        def resolve(image_path: str, domain: Optional[str]) -> Optional[Path]:
             if os.path.isabs(image_path):
-                return Path(image_path)
+                p = Path(image_path)
+                return p if p.exists() else None
             if self.root_map is not None:
                 if domain not in self.root_map:
                     raise KeyError(f"domain '{domain}' not in root_map keys={list(self.root_map.keys())}")
@@ -51,17 +52,33 @@ class IVFClassifDataset(Dataset):
                 base = self.root_dir
             else:
                 raise ValueError("Either root_dir or root_map must be provided.")
-            # tolerate case differences for hospital paths (ed1 vs ED1)
-            candidate = base / image_path
+
+            rel = Path(image_path)
+            candidate = base / rel
             if candidate.exists():
                 return candidate
-            lower_rel = Path(*[p.lower() for p in Path(image_path).parts])
+            # lowercase fallback
+            lower_rel = Path(*[p.lower() for p in rel.parts])
             candidate2 = base / lower_rel
             if candidate2.exists():
                 return candidate2
-            raise FileNotFoundError(f"Image not found for {image_path} under {base}")
+            # insert alldata if missing (EDx/1/0.png -> EDx/alldata/1/0.png)
+            parts = list(lower_rel.parts)
+            if parts and parts[0].startswith("ed") and (len(parts) < 2 or parts[1] != "alldata"):
+                rel_with_alldata = Path(parts[0], "alldata", *parts[1:])
+                candidate3 = base / rel_with_alldata
+                if candidate3.exists():
+                    return candidate3
+            return None
 
         df["abs_path"] = df.apply(lambda r: resolve(r["image_path"], r.get("domain")), axis=1)
+        before = len(df)
+        df = df[df["abs_path"].notna()].reset_index(drop=True)
+        skipped = before - len(df)
+        if skipped:
+            print(f"[IVFClassifDataset] Skipped {skipped} missing files; remaining {len(df)} samples.")
+        if len(df) == 0:
+            raise ValueError(f"No samples remain after filtering missing files in {csv_path}")
         label_col = None
         for col in ["unified_label", "label_id", "label"]:
             if col in df.columns:
