@@ -12,7 +12,8 @@ from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import pandas as pd
 from PIL import Image
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, get_worker_info
+import torch
 
 
 def infer_day_from_path(path: str) -> Optional[int]:
@@ -53,10 +54,12 @@ class IVFSSLDataset(Dataset):
         root_dir: Optional[Path] = None,
         root_map: Optional[Dict[str, Union[str, Path]]] = None,
         use_domains: Optional[List[str]] = None,
+        num_stage_positives: int = 1,
     ) -> None:
         self.root_dir = Path(root_dir) if root_dir else None
         self.root_map = {k: Path(v) for k, v in root_map.items()} if root_map else None
         self.use_domains = use_domains
+        self.num_stage_positives = num_stage_positives
         dfs = [pd.read_csv(p) for p in csv_paths]
         df = pd.concat(dfs, ignore_index=True)
         if self.use_domains is not None and "domain" in df.columns:
@@ -122,14 +125,46 @@ class IVFSSLDataset(Dataset):
 
         self.transform1 = transform1
         self.transform2 = transform2
+        self.abs_paths: List[Path] = df["abs_path"].tolist()
 
         # Build stage -> indices map for potential use
         self.stage_to_indices: Dict[str, List[int]] = {}
         for idx, sid in enumerate(self.stage_ids):
             self.stage_to_indices.setdefault(sid, []).append(idx)
 
+        # Quick stat: fraction of samples with at least 2 per stage
+        two_plus = sum(len(v) for v in self.stage_to_indices.values() if len(v) >= 2)
+        if len(self.stage_ids) > 0:
+            pct_two_plus = 100.0 * two_plus / len(self.stage_ids)
+            print(f"[IVFSSLDataset] {pct_two_plus:.1f}% samples have >=2 per stage.")
+
     def __len__(self) -> int:
         return len(self.df)
+
+    def sample_stage_positives(self, idx: int, k: Optional[int] = None) -> List[int]:
+        """Sample up to k other indices with the same stage as idx, deterministic per worker."""
+        k = k if k is not None else self.num_stage_positives
+        stage_id = self.stage_ids[idx]
+        candidates = [j for j in self.stage_to_indices.get(stage_id, []) if j != idx]
+        if not candidates or k <= 0:
+            return []
+        if len(candidates) <= k:
+            return candidates
+        info = get_worker_info()
+        seed = (info.seed if info else torch.initial_seed()) + idx
+        g = torch.Generator()
+        g.manual_seed(seed)
+        perm = torch.randperm(len(candidates), generator=g)[:k].tolist()
+        return [candidates[i] for i in perm]
+
+    def get_view(self, idx: int, view: int = 1):
+        """Load an image and apply the same SSL transform pipeline."""
+        img_path = self.abs_paths[idx]
+        with Image.open(img_path) as img:
+            img = img.convert("RGB")
+        if view == 2:
+            return self.transform2(img)
+        return self.transform1(img)
 
     def __getitem__(self, idx: int) -> Tuple:
         row = self.df.iloc[idx]
@@ -139,4 +174,5 @@ class IVFSSLDataset(Dataset):
         img1 = self.transform1(img)
         img2 = self.transform2(img)
         stage_id = self.stage_ids[idx]
-        return img1, img2, stage_id, idx
+        pos_indices = self.sample_stage_positives(idx, self.num_stage_positives)
+        return img1, img2, stage_id, pos_indices, idx

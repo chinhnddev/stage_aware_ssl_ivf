@@ -28,8 +28,8 @@ ssl:
 
 stage:
   enabled: true
-  num_stage_positives: 2
-  lambda_stage: 0.5
+  num_stage_positives: 1   # use a single positive per anchor to reduce noise
+  lambda_stage: 0.2        # softer weighting for stage consistency
   min_per_stage_in_batch: 2
 
 logging:

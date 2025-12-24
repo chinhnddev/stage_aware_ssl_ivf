@@ -11,6 +11,7 @@ from typing import Dict, List
 
 import torch
 from torch import nn, optim
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torchvision import transforms
 import yaml
@@ -36,9 +37,9 @@ def build_transforms(img_size: int) -> transforms.Compose:
             transforms.RandomResizedCrop(img_size, scale=(0.7, 1.0)),
             transforms.RandomHorizontalFlip(),
             transforms.RandomVerticalFlip(),
-            transforms.RandomRotation(45),
-            transforms.ColorJitter(0.1, 0.1, 0.1, 0.05),
-            transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 1.0)),
+            transforms.RandomRotation(30),
+            transforms.ColorJitter(0.05, 0.05, 0.05, 0.02),
+            transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 0.5)),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ]
@@ -61,6 +62,7 @@ def create_dataloader(cfg: Dict) -> DataLoader:
         root_dir=Path(data_cfg["root_dir"]) if data_cfg.get("root_dir") else None,
         root_map=data_cfg.get("root_map"),
         use_domains=data_cfg.get("use_domains"),
+        num_stage_positives=cfg["stage"]["num_stage_positives"],
     )
     loader = DataLoader(
         dataset,
@@ -111,17 +113,38 @@ def train(cfg: Dict) -> None:
         total_byol = 0.0
         total_stage = 0.0
         pbar = tqdm(enumerate(loader), total=len(loader), desc=f"Epoch {epoch}")
-        for step, (x1, x2, stage_ids, _) in pbar:
+        dataset = loader.dataset
+        for step, (x1, x2, stage_ids, pos_lists, _) in pbar:
             x1 = x1.to(device, non_blocking=True)
             x2 = x2.to(device, non_blocking=True)
 
             with torch.amp.autocast("cuda", enabled=cfg["ssl"].get("fp16", False)):
                 p1, p2, t1, t2 = model(x1, x2)
                 loss_byol = byol_loss(p1, p2, t1, t2)
-                # Stage loss uses target embeddings t1
-                stage_l = stage_loss(t1.detach(), stage_ids, num_stage_pos) if lambda_stage > 0 else torch.tensor(
-                    0.0, device=device
-                )
+                stage_terms = []
+                stage_pos_anchors = 0
+                # Collect unique positive indices across the batch
+                all_pos_indices = {pi for pis in pos_lists for pi in pis}
+                pos_emb_dict: Dict[int, torch.Tensor] = {}
+                if all_pos_indices:
+                    with torch.no_grad():
+                        pos_imgs = torch.stack([dataset.get_view(pi, view=1) for pi in all_pos_indices]).to(
+                            device, non_blocking=True
+                        )
+                        t_pos = model.target_projector(model.target_backbone(pos_imgs))
+                        t_pos = F.normalize(t_pos, dim=-1)
+                        pos_emb_dict = {pi: emb for pi, emb in zip(all_pos_indices, t_pos)}
+
+                anchor_t = F.normalize(t1.detach(), dim=-1)
+                for anchor_emb, pos_idx_list in zip(anchor_t, pos_lists):
+                    valid = [pi for pi in pos_idx_list if pi in pos_emb_dict]
+                    if not valid:
+                        continue
+                    stage_pos_anchors += 1
+                    for pi in valid:
+                        stage_terms.append(1 - torch.dot(anchor_emb, pos_emb_dict[pi]))
+
+                stage_l = torch.stack(stage_terms).mean() if stage_terms else torch.tensor(0.0, device=device)
                 loss = loss_byol + lambda_stage * stage_l
 
             optimizer.zero_grad()
@@ -139,6 +162,7 @@ def train(cfg: Dict) -> None:
                     loss=total_loss / (step + 1),
                     byol=total_byol / (step + 1),
                     stage=total_stage / (step + 1),
+                    stage_pos=stage_pos_anchors,
                 )
 
         epoch_loss = total_loss / len(loader)
