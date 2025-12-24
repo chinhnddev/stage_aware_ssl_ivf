@@ -70,10 +70,10 @@ class IVFSSLDataset(Dataset):
                 if domain not in self.root_map:
                     raise KeyError(f"domain '{domain}' not found in root_map keys={list(self.root_map.keys())}")
                 base_path = self.root_map[domain] / str(image_path)
-            if self.root_dir is None:
-                raise ValueError("Either root_dir or root_map must be provided.")
-            else:
+            elif self.root_dir is not None:
                 base_path = self.root_dir / str(image_path)
+            else:
+                raise ValueError("Either root_dir or root_map must be provided.")
 
             # Try case-insensitive fallback (e.g., ED1 vs ed1 on Linux).
             if not base_path.exists() and isinstance(domain, str) and domain.lower() == "hospital":
