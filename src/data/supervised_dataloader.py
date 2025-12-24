@@ -46,8 +46,14 @@ def _ensure_split(cfg_data: Dict) -> Path:
     """
     csv_path = Path(cfg_data["csv_path"])
     df = pd.read_csv(csv_path)
-    if "split" in df.columns and df["split"].notna().any():
-        return csv_path
+    use_domain = cfg_data.get("use_domain")
+    subset = df[df["domain"] == use_domain] if use_domain else df
+
+    # If split exists and contains all train/val/test for the selected domain, reuse it
+    if "split" in df.columns and subset["split"].notna().any():
+        splits_present = set(subset["split"].dropna().unique().tolist())
+        if {"train", "val", "test"}.issubset(splits_present):
+            return csv_path
 
     use_domain = cfg_data.get("use_domain")
     if use_domain:
