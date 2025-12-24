@@ -136,7 +136,7 @@ def train(cfg: Dict) -> None:
     else:
         scheduler = None
 
-    scaler = torch.cuda.amp.GradScaler(enabled=cfg["train"].get("fp16", False))
+    scaler = torch.amp.GradScaler("cuda", enabled=cfg["train"].get("fp16", False))
 
     out_dir = Path(cfg["logging"]["out_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -153,7 +153,7 @@ def train(cfg: Dict) -> None:
         for x, y in tqdm(train_loader, desc=f"Epoch {epoch}"):
             x = x.to(device, non_blocking=True)
             y = y.to(device, non_blocking=True).view(-1, 1)
-            with torch.cuda.amp.autocast(enabled=cfg["train"].get("fp16", False)):
+            with torch.amp.autocast("cuda", enabled=cfg["train"].get("fp16", False)):
                 logits = model(x)
                 loss = criterion(logits, y)
             optimizer.zero_grad()

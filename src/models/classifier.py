@@ -28,7 +28,10 @@ class LinearHead(nn.Module):
         self.fc = nn.Linear(in_dim, 1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.pool(x).flatten(1)
+        if x.dim() == 2:
+            x = x
+        else:
+            x = self.pool(x).flatten(1)
         return self.fc(x)
 
 
@@ -44,7 +47,10 @@ class MLPHead(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.pool(x).flatten(1)
+        if x.dim() == 2:
+            x = x
+        else:
+            x = self.pool(x).flatten(1)
         return self.net(x)
 
 
@@ -82,4 +88,3 @@ def freeze_backbone(backbone: nn.Module, until: str = "none") -> None:
     elif until == "all":
         for p in backbone.parameters():
             p.requires_grad = True
-
