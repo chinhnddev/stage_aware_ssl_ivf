@@ -62,7 +62,14 @@ class IVFClassifDataset(Dataset):
             raise FileNotFoundError(f"Image not found for {image_path} under {base}")
 
         df["abs_path"] = df.apply(lambda r: resolve(r["image_path"], r.get("domain")), axis=1)
-        self.labels: List[float] = df["unified_label"].astype(float).tolist()
+        label_col = None
+        for col in ["unified_label", "label_id", "label"]:
+            if col in df.columns:
+                label_col = col
+                break
+        if label_col is None:
+            raise KeyError("No label column found. Expected one of: unified_label, label_id, label")
+        self.labels: List[float] = df[label_col].astype(float).tolist()
         self.paths: List[Path] = df["abs_path"].tolist()
 
     def __len__(self) -> int:

@@ -39,6 +39,13 @@ def _make_transforms(img_size: int, train: bool):
         )
 
 
+def _get_label_series(df: pd.DataFrame) -> pd.Series:
+    for col in ["unified_label", "label_id", "label"]:
+        if col in df.columns:
+            return df[col]
+    raise KeyError("No label column found. Expected one of: unified_label, label_id, label")
+
+
 def _ensure_split(cfg_data: Dict) -> Path:
     """
     Ensure CSV has split column; if missing, create stratified split within the requested domain.
@@ -58,7 +65,7 @@ def _ensure_split(cfg_data: Dict) -> Path:
     use_domain = cfg_data.get("use_domain")
     if use_domain:
         df = df[df["domain"] == use_domain].reset_index(drop=True)
-    labels = df["unified_label"].astype(int)
+    labels = _get_label_series(df).astype(int)
     seed = cfg_data.get("split", {}).get("seed", 42)
     test_size = cfg_data.get("split", {}).get("test_size", 0.15)
     val_size = cfg_data.get("split", {}).get("val_size", 0.15)
