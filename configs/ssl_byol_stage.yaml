@@ -1,0 +1,36 @@
+data:
+  csv_paths:
+    - data-curation/metadata_public.csv
+    - data-curation/metadata_hospital_all.csv
+  root_dir: .
+  img_size: 224
+  batch_size: 128
+  num_workers: 8
+  use_domains: ["public", "hospital"]
+  stage_keys: ["day", "stage_group"]
+
+ssl:
+  method: byol
+  backbone: resnet50
+  proj_dim: 256
+  pred_dim: 256
+  ema_tau: 0.996
+  lr: 0.001
+  weight_decay: 1.0e-6
+  epochs: 200
+  warmup_epochs: 10
+  optimizer: adamw
+  scheduler: cosine
+  fp16: true
+  seed: 42
+
+stage:
+  enabled: true
+  num_stage_positives: 2
+  lambda_stage: 0.5
+  min_per_stage_in_batch: 2
+
+logging:
+  out_dir: outputs/ssl_byol_stage
+  log_every: 50
+  save_every_epochs: 10
