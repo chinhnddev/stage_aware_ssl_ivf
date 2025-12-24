@@ -77,7 +77,14 @@ class IVFSSLDataset(Dataset):
 
             # Try case-insensitive fallback on the relative path only (e.g., ED1 -> ed1) for hospital.
             if not base_path.exists() and isinstance(domain, str) and domain.lower() == "hospital":
-                rel_lower = Path(*[part.lower() for part in Path(image_path).parts])
+                rel_parts = [part.lower() for part in Path(image_path).parts]
+                # Some rows may miss "alldata" in the path; insert if absent.
+                if rel_parts and rel_parts[0].startswith("ed") and (len(rel_parts) == 2 or rel_parts[1] != "alldata"):
+                    rel_with_alldata = [rel_parts[0], "alldata"] + rel_parts[1:]
+                    candidate = (self.root_map[domain] if self.root_map else Path(".")) / Path(*rel_with_alldata)
+                    if candidate.exists():
+                        return candidate
+                rel_lower = Path(*rel_parts)
                 lower_path = self.root_map[domain] / rel_lower if self.root_map else base_path
                 if lower_path.exists():
                     return lower_path
