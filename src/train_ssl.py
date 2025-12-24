@@ -51,19 +51,22 @@ def load_config(path: Path) -> Dict:
 
 
 def create_dataloader(cfg: Dict) -> DataLoader:
-    img_size = cfg["data"]["img_size"]
+    data_cfg = cfg["data"]
+    img_size = data_cfg["img_size"]
     tfm = build_transforms(img_size)
     dataset = IVFSSLDataset(
-        csv_paths=[Path(p) for p in cfg["data"]["csv_paths"]],
-        root_dir=Path(cfg["data"]["root_dir"]),
+        csv_paths=[Path(p) for p in data_cfg["csv_paths"]],
+        root_dir=Path(data_cfg["root_dir"]) if data_cfg.get("root_dir") else None,
+        root_map=data_cfg.get("root_map"),
+        use_domains=data_cfg.get("use_domains"),
         transform1=tfm,
         transform2=tfm,
     )
     loader = DataLoader(
         dataset,
-        batch_size=cfg["data"]["batch_size"],
+        batch_size=data_cfg["batch_size"],
         shuffle=True,
-        num_workers=cfg["data"]["num_workers"],
+        num_workers=data_cfg["num_workers"],
         pin_memory=True,
         drop_last=True,
     )

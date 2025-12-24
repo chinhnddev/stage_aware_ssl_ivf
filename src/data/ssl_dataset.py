@@ -5,9 +5,10 @@ Stage-aware self-supervised dataset for IVF embryo images.
 from __future__ import annotations
 
 import re
+import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import pandas as pd
 from PIL import Image
@@ -47,16 +48,37 @@ class IVFSSLDataset(Dataset):
     def __init__(
         self,
         csv_paths: List[Path],
-        root_dir: Path,
+        root_dir: Optional[Path] = None,
+        root_map: Optional[Dict[str, Union[str, Path]]] = None,
+        use_domains: Optional[List[str]] = None,
         transform1: Callable,
         transform2: Callable,
     ) -> None:
-        self.root_dir = Path(root_dir)
+        self.root_dir = Path(root_dir) if root_dir else None
+        self.root_map = {k: Path(v) for k, v in root_map.items()} if root_map else None
+        self.use_domains = use_domains
         dfs = [pd.read_csv(p) for p in csv_paths]
         df = pd.concat(dfs, ignore_index=True)
+        if self.use_domains is not None and "domain" in df.columns:
+            df = df[df["domain"].isin(self.use_domains)].reset_index(drop=True)
+
+        # Resolve full paths per-domain if root_map is provided; fallback to single root_dir.
+        def _resolve_image_path(image_path: str, domain: Optional[str]) -> Path:
+            if os.path.isabs(str(image_path)):
+                return Path(image_path)
+            if self.root_map is not None:
+                if domain not in self.root_map:
+                    raise KeyError(f"domain '{domain}' not found in root_map keys={list(self.root_map.keys())}")
+                return self.root_map[domain] / str(image_path)
+            if self.root_dir is None:
+                raise ValueError("Either root_dir or root_map must be provided.")
+            return self.root_dir / str(image_path)
+
+        df["abs_path"] = df.apply(
+            lambda r: _resolve_image_path(r["image_path"], r["domain"] if "domain" in r else None), axis=1
+        )
 
         # Drop rows whose image files are missing to avoid worker FileNotFoundError.
-        df["abs_path"] = df["image_path"].apply(lambda p: self.root_dir / str(p))
         exists_mask = df["abs_path"].apply(lambda p: p.exists())
         missing = (~exists_mask).sum()
         df = df[exists_mask].reset_index(drop=True)
