@@ -1,0 +1,44 @@
+data:
+  csv_path: "data-curation/metadata_hospital_all_with_split.csv"
+  root_map:
+    hospital: "/content/drive/MyDrive/EMBRYO_CLASSIFICATION/stage_aware_ssl_ivf/data/HungVuong_hospital_dataset/Human embryo image datasets"
+    public: "/content/drive/MyDrive/EMBRYO_CLASSIFICATION/stage_aware_ssl_ivf/data/embyro_public_dataset"
+  use_domain: "hospital"
+  img_size: 224
+  batch_size: 64
+  num_workers: 8
+  split:
+    make_if_missing: false
+    seed: 42
+    test_size: 0.15
+    val_size: 0.15
+
+model:
+  backbone: resnet50
+  head: mlp   # or linear
+  dropout: 0.2
+  pretrained:
+    enabled: true
+    path: "outputs/ssl_byol_stage/encoder_ssl.pth"
+    from_byol_ckpt: false
+
+train:
+  epochs: 40
+  warmup_epochs: 5
+  unfreeze: "layer4"  # ["none","layer4","all"]
+  lr_head: 1.0e-3
+  lr_backbone: 1.0e-4
+  weight_decay: 1.0e-6
+  fp16: true
+  pos_weight: "auto"
+  early_stop_patience: 10
+  scheduler: "cosine"
+  seed: 42
+
+eval:
+  threshold: 0.5
+  tune_threshold_on_val: true
+
+logging:
+  out_dir: "outputs/ft/run_ssl_stage_fixedsplit"
+  select_metric: "val_auprc"
