@@ -57,7 +57,15 @@ class IVFSSLDataset(Dataset):
 
         # Drop rows whose image files are missing to avoid worker FileNotFoundError.
         df["abs_path"] = df["image_path"].apply(lambda p: self.root_dir / str(p))
-        df = df[df["abs_path"].apply(lambda p: p.exists())].reset_index(drop=True)
+        exists_mask = df["abs_path"].apply(lambda p: p.exists())
+        missing = (~exists_mask).sum()
+        df = df[exists_mask].reset_index(drop=True)
+        if missing:
+            print(f"[IVFSSLDataset] Skipped {missing} missing files; remaining {len(df)} samples.")
+        if len(df) == 0:
+            raise ValueError(
+                f"No images found after filtering. Check data.root_dir='{self.root_dir}' and csv image_path values."
+            )
         # Allowed domains/datasets handled upstream; ignore label columns.
         self.df = df
 
