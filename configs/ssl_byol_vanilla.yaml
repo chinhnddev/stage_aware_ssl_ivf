@@ -3,11 +3,11 @@ data:
     - data-curation/metadata_public.csv
     - data-curation/metadata_hospital_all.csv
   root_map:
-    public: "/content/drive/MyDrive/EMBRYO_CLASSIFICATION/stage_aware_ssl_ivf/data/embyro_public_dataset"
-    hospital: "/content/drive/MyDrive/EMBRYO_CLASSIFICATION/stage_aware_ssl_ivf/data/HungVuong_hospital_dataset/Human embryo image datasets"
+    public: "/content/data/embyro_public_dataset"
+    hospital: "/content/data/HungVuong_hospital_dataset/Human embryo image datasets"
   img_size: 224
   batch_size: 128
-  num_workers: 2
+  num_workers: 12
   use_domains: ["public", "hospital"]
   stage_keys: ["day", "stage_group"]
 
