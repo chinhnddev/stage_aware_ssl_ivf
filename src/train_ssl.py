@@ -109,7 +109,7 @@ def train(cfg: Dict) -> None:
             x1 = x1.to(device, non_blocking=True)
             x2 = x2.to(device, non_blocking=True)
 
-            with torch.cuda.amp.autocast(enabled=cfg["ssl"].get("fp16", False)):
+            with torch.amp.autocast("cuda", enabled=cfg["ssl"].get("fp16", False)):
                 p1, p2, t1, t2 = model(x1, x2)
                 loss_byol = byol_loss(p1, p2, t1, t2)
                 # Stage loss uses target embeddings t1
