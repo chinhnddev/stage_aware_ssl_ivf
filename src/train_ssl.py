@@ -115,6 +115,14 @@ def train(cfg: Dict) -> None:
         pbar = tqdm(enumerate(loader), total=len(loader), desc=f"Epoch {epoch}")
         dataset = loader.dataset
         for step, (x1, x2, stage_ids, pos_lists, _) in pbar:
+            # Normalize pos_lists to list of list[int] to avoid tensor membership issues
+            if isinstance(pos_lists, torch.Tensor):
+                pos_lists = pos_lists.tolist()
+            else:
+                pos_lists = [
+                    pl.tolist() if isinstance(pl, torch.Tensor) else pl  # type: ignore[union-attr]
+                    for pl in pos_lists
+                ]
             x1 = x1.to(device, non_blocking=True)
             x2 = x2.to(device, non_blocking=True)
 
