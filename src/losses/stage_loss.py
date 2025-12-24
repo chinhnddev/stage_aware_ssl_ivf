@@ -16,8 +16,11 @@ def stage_loss(
     num_stage_positives: int = 2,
 ) -> torch.Tensor:
     """
+    Legacy batch-only stage loss (positives must be in the same batch).
     embeddings: [B, D] target embeddings (detached).
     stage_ids: list of stage_id strings length B.
+    This is kept for backward compatibility; new code should use
+    stage_loss_from_pairs with positives sampled across the dataset.
     """
     B = embeddings.size(0)
     loss_terms = []
@@ -37,3 +40,36 @@ def stage_loss(
     if not loss_terms:
         return torch.tensor(0.0, device=embeddings.device, dtype=embeddings.dtype)
     return torch.stack(loss_terms).mean()
+
+
+def stage_loss_from_pairs(
+    anchor_embeddings: torch.Tensor,
+    pos_emb_dict: dict[int, torch.Tensor],
+    pos_lists: Sequence[Sequence[int]],
+) -> tuple[torch.Tensor, int]:
+    """
+    Stage loss when positives are sampled across the dataset.
+    anchor_embeddings: [B, D] target embeddings for anchors (already detached).
+    pos_emb_dict: mapping from dataset index -> target embedding for that positive.
+    pos_lists: list per anchor of dataset indices to treat as positives.
+    Returns: (mean loss, anchors_with_pos_count)
+    """
+    if len(pos_emb_dict) == 0:
+        zero = torch.tensor(0.0, device=anchor_embeddings.device, dtype=anchor_embeddings.dtype)
+        return zero, 0
+
+    anchor_t = torch.nn.functional.normalize(anchor_embeddings, dim=-1)
+    loss_terms = []
+    anchors_with_pos = 0
+    for anchor_emb, pos_idx_list in zip(anchor_t, pos_lists):
+        valid = [pi for pi in pos_idx_list if pi in pos_emb_dict]
+        if not valid:
+            continue
+        anchors_with_pos += 1
+        for pi in valid:
+            loss_terms.append(1 - torch.dot(anchor_emb, pos_emb_dict[pi]))
+
+    if not loss_terms:
+        zero = torch.tensor(0.0, device=anchor_embeddings.device, dtype=anchor_embeddings.dtype)
+        return zero, anchors_with_pos
+    return torch.stack(loss_terms).mean(), anchors_with_pos

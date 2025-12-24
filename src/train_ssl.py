@@ -23,7 +23,6 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.data.ssl_dataset import IVFSSLDataset
-from src.losses.stage_loss import stage_loss
 from src.models.backbone import build_backbone
 from src.models.byol import BYOL, byol_loss
 from src.utils.checkpoint import save_checkpoint, load_checkpoint
@@ -100,7 +99,6 @@ def train(cfg: Dict) -> None:
 
     num_epochs = cfg["ssl"]["epochs"]
     lambda_stage = cfg["stage"]["lambda_stage"] if cfg["stage"]["enabled"] else 0.0
-    num_stage_pos = cfg["stage"]["num_stage_positives"]
     log_every = cfg["logging"].get("log_every", 50)
     save_every = cfg["logging"].get("save_every_epochs", 10)
     patience = cfg["logging"].get("early_stop_patience")
@@ -112,6 +110,7 @@ def train(cfg: Dict) -> None:
         total_loss = 0.0
         total_byol = 0.0
         total_stage = 0.0
+        total_stage_pos_anchors = 0
         pbar = tqdm(enumerate(loader), total=len(loader), desc=f"Epoch {epoch}")
         dataset = loader.dataset
         for step, (x1, x2, stage_ids, pos_lists, _) in pbar:
@@ -121,30 +120,35 @@ def train(cfg: Dict) -> None:
             with torch.amp.autocast("cuda", enabled=cfg["ssl"].get("fp16", False)):
                 p1, p2, t1, t2 = model(x1, x2)
                 loss_byol = byol_loss(p1, p2, t1, t2)
-                stage_terms = []
-                stage_pos_anchors = 0
-                # Collect unique positive indices across the batch
-                all_pos_indices = {pi for pis in pos_lists for pi in pis}
-                pos_emb_dict: Dict[int, torch.Tensor] = {}
-                if all_pos_indices:
-                    with torch.no_grad():
-                        pos_imgs = torch.stack([dataset.get_view(pi, view=1) for pi in all_pos_indices]).to(
-                            device, non_blocking=True
-                        )
-                        t_pos = model.target_projector(model.target_backbone(pos_imgs))
-                        t_pos = F.normalize(t_pos, dim=-1)
-                        pos_emb_dict = {pi: emb for pi, emb in zip(all_pos_indices, t_pos)}
+                if lambda_stage > 0:
+                    stage_terms = []
+                    stage_pos_anchors = 0
+                    # Collect unique positive indices across the batch
+                    all_pos_indices = {pi for pis in pos_lists for pi in pis}
+                    pos_emb_dict: Dict[int, torch.Tensor] = {}
+                    if all_pos_indices:
+                        with torch.no_grad():
+                            pos_imgs = torch.stack([dataset.get_view(pi, view=1) for pi in all_pos_indices]).to(
+                                device, non_blocking=True
+                            )
+                            t_pos = model.target_projector(model.target_backbone(pos_imgs))
+                            t_pos = F.normalize(t_pos, dim=-1)
+                            pos_emb_dict = {pi: emb for pi, emb in zip(all_pos_indices, t_pos)}
 
-                anchor_t = F.normalize(t1.detach(), dim=-1)
-                for anchor_emb, pos_idx_list in zip(anchor_t, pos_lists):
-                    valid = [pi for pi in pos_idx_list if pi in pos_emb_dict]
-                    if not valid:
-                        continue
-                    stage_pos_anchors += 1
-                    for pi in valid:
-                        stage_terms.append(1 - torch.dot(anchor_emb, pos_emb_dict[pi]))
+                    anchor_t = F.normalize(t1.detach(), dim=-1)
+                    for anchor_emb, pos_idx_list in zip(anchor_t, pos_lists):
+                        valid = [pi for pi in pos_idx_list if pi in pos_emb_dict]
+                        if not valid:
+                            continue
+                        stage_pos_anchors += 1
+                        for pi in valid:
+                            stage_terms.append(1 - torch.dot(anchor_emb, pos_emb_dict[pi]))
 
-                stage_l = torch.stack(stage_terms).mean() if stage_terms else torch.tensor(0.0, device=device)
+                    stage_l = torch.stack(stage_terms).mean() if stage_terms else torch.tensor(0.0, device=device)
+                else:
+                    stage_l = torch.tensor(0.0, device=device)
+                    stage_pos_anchors = 0
+
                 loss = loss_byol + lambda_stage * stage_l
 
             optimizer.zero_grad()
@@ -156,13 +160,14 @@ def train(cfg: Dict) -> None:
             total_loss += loss.item()
             total_byol += loss_byol.item()
             total_stage += stage_l.item()
+            total_stage_pos_anchors += stage_pos_anchors
 
             if (step + 1) % log_every == 0:
                 pbar.set_postfix(
                     loss=total_loss / (step + 1),
                     byol=total_byol / (step + 1),
                     stage=total_stage / (step + 1),
-                    stage_pos=stage_pos_anchors,
+                    stage_pos=total_stage_pos_anchors / (step + 1),
                 )
 
         epoch_loss = total_loss / len(loader)
