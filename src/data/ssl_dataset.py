@@ -75,9 +75,10 @@ class IVFSSLDataset(Dataset):
             else:
                 raise ValueError("Either root_dir or root_map must be provided.")
 
-            # Try case-insensitive fallback (e.g., ED1 vs ed1 on Linux).
+            # Try case-insensitive fallback on the relative path only (e.g., ED1 -> ed1) for hospital.
             if not base_path.exists() and isinstance(domain, str) and domain.lower() == "hospital":
-                lower_path = Path(*[p.lower() for p in base_path.parts])
+                rel_lower = Path(*[part.lower() for part in Path(image_path).parts])
+                lower_path = self.root_map[domain] / rel_lower if self.root_map else base_path
                 if lower_path.exists():
                     return lower_path
             return base_path
