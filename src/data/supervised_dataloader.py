@@ -79,7 +79,7 @@ def _ensure_split(cfg_data: Dict) -> Path:
         train_idx, test_idx = next(gss.split(df, groups=groups))
         df_train = df.iloc[train_idx].reset_index(drop=True)
         df_test = df.iloc[test_idx].reset_index(drop=True)
-        labels_train = df_train["unified_label"].astype(int)
+        labels_train = _get_label_series(df_train).astype(int)
         groups_train = df_train[group_cols[0]]
         val_size_adj = val_size / (1 - test_size)
         gss_val = GroupShuffleSplit(n_splits=1, test_size=val_size_adj, random_state=seed)
@@ -87,7 +87,7 @@ def _ensure_split(cfg_data: Dict) -> Path:
         df_train, df_val = df_train.iloc[train_idx2].reset_index(drop=True), df_train.iloc[val_idx].reset_index(drop=True)
     else:
         df_train, df_test = train_test_split(df, test_size=test_size, stratify=labels, random_state=seed)
-        labels_train = df_train["unified_label"].astype(int)
+        labels_train = _get_label_series(df_train).astype(int)
         val_size_adj = val_size / (1 - test_size)
         df_train, df_val = train_test_split(
             df_train, test_size=val_size_adj, stratify=labels_train, random_state=seed
