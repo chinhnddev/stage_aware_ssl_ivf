@@ -1,14 +1,14 @@
 data:
-  csv_path: "data-curation/metadata_hospital_all.csv"
+  csv_path: "data-curation/metadata_hospital_all_with_split.csv"
   root_map:
-    hospital: "/content/drive/MyDrive/EMBRYO_CLASSIFICATION/stage_aware_ssl_ivf/data/HungVuong_hospital_dataset/Human embryo image datasets"
-    public: "/content/drive/MyDrive/EMBRYO_CLASSIFICATION/stage_aware_ssl_ivf/data/embyro_public_dataset"
+    hospital: "/content/data/HungVuong_hospital_dataset/Human embryo image datasets"
+    public: "/content/data/embyro_public_dataset"
   use_domain: "hospital"
   img_size: 224
   batch_size: 64
   num_workers: 8
   split:
-    make_if_missing: true
+    make_if_missing: false
     seed: 42
     test_size: 0.15
     val_size: 0.15
