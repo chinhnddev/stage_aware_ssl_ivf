@@ -88,7 +88,7 @@ def train(cfg: Dict) -> None:
     optimizer = optim.AdamW(
         model.parameters(), lr=cfg["ssl"]["lr"], weight_decay=cfg["ssl"]["weight_decay"]
     )
-    scaler = torch.cuda.amp.GradScaler(enabled=cfg["ssl"].get("fp16", False))
+    scaler = torch.amp.GradScaler("cuda", enabled=cfg["ssl"].get("fp16", False))
 
     out_dir = Path(cfg["logging"]["out_dir"])
     logger = Logger(out_dir / "train.log")

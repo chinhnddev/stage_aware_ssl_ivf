@@ -54,8 +54,12 @@ class IVFSSLDataset(Dataset):
         self.root_dir = Path(root_dir)
         dfs = [pd.read_csv(p) for p in csv_paths]
         df = pd.concat(dfs, ignore_index=True)
+
+        # Drop rows whose image files are missing to avoid worker FileNotFoundError.
+        df["abs_path"] = df["image_path"].apply(lambda p: self.root_dir / str(p))
+        df = df[df["abs_path"].apply(lambda p: p.exists())].reset_index(drop=True)
         # Allowed domains/datasets handled upstream; ignore label columns.
-        self.df = df.reset_index(drop=True)
+        self.df = df
 
         # Resolve stage metadata
         days = df["day"] if "day" in df.columns else None
@@ -83,7 +87,7 @@ class IVFSSLDataset(Dataset):
 
     def __getitem__(self, idx: int) -> Tuple:
         row = self.df.iloc[idx]
-        img_path = self.root_dir / row["image_path"]
+        img_path = row["abs_path"]
         with Image.open(img_path) as img:
             img = img.convert("RGB")
         img1 = self.transform1(img)

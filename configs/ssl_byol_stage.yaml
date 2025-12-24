@@ -5,7 +5,7 @@ data:
   root_dir: .
   img_size: 224
   batch_size: 128
-  num_workers: 8
+  num_workers: 2
   use_domains: ["public", "hospital"]
   stage_keys: ["day", "stage_group"]
 
