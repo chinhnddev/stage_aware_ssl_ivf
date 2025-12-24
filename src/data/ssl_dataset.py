@@ -48,11 +48,11 @@ class IVFSSLDataset(Dataset):
     def __init__(
         self,
         csv_paths: List[Path],
+        transform1: Callable,
+        transform2: Callable,
         root_dir: Optional[Path] = None,
         root_map: Optional[Dict[str, Union[str, Path]]] = None,
         use_domains: Optional[List[str]] = None,
-        transform1: Callable,
-        transform2: Callable,
     ) -> None:
         self.root_dir = Path(root_dir) if root_dir else None
         self.root_map = {k: Path(v) for k, v in root_map.items()} if root_map else None

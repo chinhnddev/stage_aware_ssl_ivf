@@ -56,11 +56,11 @@ def create_dataloader(cfg: Dict) -> DataLoader:
     tfm = build_transforms(img_size)
     dataset = IVFSSLDataset(
         csv_paths=[Path(p) for p in data_cfg["csv_paths"]],
+        transform1=tfm,
+        transform2=tfm,
         root_dir=Path(data_cfg["root_dir"]) if data_cfg.get("root_dir") else None,
         root_map=data_cfg.get("root_map"),
         use_domains=data_cfg.get("use_domains"),
-        transform1=tfm,
-        transform2=tfm,
     )
     loader = DataLoader(
         dataset,
