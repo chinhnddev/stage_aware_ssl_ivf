@@ -98,6 +98,9 @@ def train(cfg: Dict) -> None:
     num_stage_pos = cfg["stage"]["num_stage_positives"]
     log_every = cfg["logging"].get("log_every", 50)
     save_every = cfg["logging"].get("save_every_epochs", 10)
+    patience = cfg["logging"].get("early_stop_patience")
+    best_loss = float("inf")
+    epochs_no_improve = 0
 
     for epoch in range(1, num_epochs + 1):
         model.train()
@@ -135,9 +138,29 @@ def train(cfg: Dict) -> None:
                     stage=total_stage / (step + 1),
                 )
 
+        epoch_loss = total_loss / len(loader)
         logger.log(
-            f"Epoch {epoch}: loss={total_loss/len(loader):.4f}, byol={total_byol/len(loader):.4f}, stage={total_stage/len(loader):.4f}"
+            f"Epoch {epoch}: loss={epoch_loss:.4f}, byol={total_byol/len(loader):.4f}, stage={total_stage/len(loader):.4f}"
         )
+
+        if epoch_loss < best_loss:
+            best_loss = epoch_loss
+            epochs_no_improve = 0
+            best_ckpt = {
+                "epoch": epoch,
+                "model": model.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "cfg": cfg,
+            }
+            save_checkpoint(best_ckpt, out_dir / "best.ckpt")
+            logger.log(f"New best loss {best_loss:.4f} at epoch {epoch}, saved best.ckpt")
+        else:
+            epochs_no_improve += 1
+            if patience and epochs_no_improve >= patience:
+                logger.log(
+                    f"Early stopping at epoch {epoch} (no improvement for {patience} epochs; best loss {best_loss:.4f})"
+                )
+                break
 
         if epoch % save_every == 0 or epoch == num_epochs:
             ckpt = {
