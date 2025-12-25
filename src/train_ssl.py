@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import warnings
 from pathlib import Path
 from typing import Dict, List
 
@@ -64,6 +65,8 @@ def create_dataloader(cfg: Dict) -> DataLoader:
         use_domains=data_cfg.get("use_domains"),
         num_stage_positives=cfg["stage"]["num_stage_positives"],
     )
+    # Note: shuffle=True with the default sampler; no stage-balanced sampler is implemented,
+    # so stage.min_per_stage_in_batch (if set) is not enforced.
     loader = DataLoader(
         dataset,
         batch_size=data_cfg["batch_size"],
@@ -88,6 +91,12 @@ def train(cfg: Dict) -> None:
         pred_dim=cfg["ssl"]["pred_dim"],
         tau=cfg["ssl"]["ema_tau"],
     ).to(device)
+
+    if cfg["stage"].get("enabled") and cfg["stage"].get("min_per_stage_in_batch", 0) > 0:
+        warnings.warn(
+            "stage.min_per_stage_in_batch is currently unused: DataLoader uses shuffle=True and no stage-balanced sampler is implemented.",
+            stacklevel=2,
+        )
 
     loader = create_dataloader(cfg)
 

@@ -4,7 +4,8 @@ Stage-aware multi-positive loss.
 
 from __future__ import annotations
 
-from typing import List, Sequence
+import warnings
+from typing import Sequence
 
 import torch
 import torch.nn.functional as F
@@ -17,10 +18,11 @@ def stage_loss(
 ) -> torch.Tensor:
     """
     Legacy batch-only stage loss (positives must be in the same batch).
-    embeddings: [B, D] target embeddings (detached).
-    stage_ids: list of stage_id strings length B.
-    This is kept for backward compatibility; new code should use
-    stage_loss_from_pairs with positives sampled across the dataset.
+    embeddings: [B, D]; to backprop, pass ONLINE embeddings. If you pass
+    detached/target embeddings, this becomes logging-only. stage_ids: list of
+    stage_id strings length B. This is kept for backward compatibility; new
+    code should use stage_loss_from_pairs with positives sampled across the
+    dataset.
     """
     B = embeddings.size(0)
     loss_terms = []
@@ -49,19 +51,26 @@ def stage_loss_from_pairs(
 ) -> tuple[torch.Tensor, int]:
     """
     Stage loss when positives are sampled across the dataset.
-    anchor_embeddings: [B, D] target embeddings for anchors (already detached).
-    pos_emb_dict: mapping from dataset index -> target embedding for that positive.
-    pos_lists: list per anchor of dataset indices to treat as positives.
-    Returns: (mean loss, anchors_with_pos_count)
+    anchor_embeddings: [B, D] ONLINE branch embeddings; should require grad so
+    stage loss can update the online encoder. pos_emb_dict: mapping from dataset
+    index -> TARGET embedding (no grad) for that positive. pos_lists: list per
+    anchor of dataset indices to treat as positives. Returns: (mean loss,
+    anchors_with_pos_count)
     """
     if len(pos_emb_dict) == 0:
         zero = torch.tensor(0.0, device=anchor_embeddings.device, dtype=anchor_embeddings.dtype)
         return zero, 0
 
-    anchor_t = torch.nn.functional.normalize(anchor_embeddings, dim=-1)
+    if not anchor_embeddings.requires_grad:
+        warnings.warn(
+            "anchor_embeddings does not require grad; stage loss will not update the online encoder.",
+            stacklevel=2,
+        )
+
+    anchor_norm = torch.nn.functional.normalize(anchor_embeddings, dim=-1)
     loss_terms = []
     anchors_with_pos = 0
-    for anchor_emb, pos_idx_list in zip(anchor_t, pos_lists):
+    for anchor_emb, pos_idx_list in zip(anchor_norm, pos_lists):
         valid = [pi for pi in pos_idx_list if pi in pos_emb_dict]
         if not valid:
             continue
