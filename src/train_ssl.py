@@ -23,6 +23,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.data.ssl_dataset import IVFSSLDataset
+from src.losses.stage_loss import stage_loss_from_pairs
 from src.models.backbone import build_backbone
 from src.models.byol import BYOL, byol_loss
 from src.utils.checkpoint import save_checkpoint, load_checkpoint
@@ -130,8 +131,6 @@ def train(cfg: Dict) -> None:
                 p1, p2, t1, t2 = model(x1, x2)
                 loss_byol = byol_loss(p1, p2, t1, t2)
                 if lambda_stage > 0:
-                    stage_terms = []
-                    stage_pos_anchors = 0
                     # Collect unique positive indices across the batch
                     all_pos_indices = {pi for pis in pos_lists for pi in pis}
                     pos_emb_dict: Dict[int, torch.Tensor] = {}
@@ -144,16 +143,8 @@ def train(cfg: Dict) -> None:
                             t_pos = F.normalize(t_pos, dim=-1)
                             pos_emb_dict = {pi: emb for pi, emb in zip(all_pos_indices, t_pos)}
 
-                    anchor_t = F.normalize(t1.detach(), dim=-1)
-                    for anchor_emb, pos_idx_list in zip(anchor_t, pos_lists):
-                        valid = [pi for pi in pos_idx_list if pi in pos_emb_dict]
-                        if not valid:
-                            continue
-                        stage_pos_anchors += 1
-                        for pi in valid:
-                            stage_terms.append(1 - torch.dot(anchor_emb, pos_emb_dict[pi]))
-
-                    stage_l = torch.stack(stage_terms).mean() if stage_terms else torch.tensor(0.0, device=device)
+                    anchor_z = p1
+                    stage_l, stage_pos_anchors = stage_loss_from_pairs(anchor_z, pos_emb_dict, pos_lists)
                 else:
                     stage_l = torch.tensor(0.0, device=device)
                     stage_pos_anchors = 0
