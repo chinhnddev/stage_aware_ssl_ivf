@@ -5,6 +5,7 @@ Supervised dataset for embryo quality classification.
 from __future__ import annotations
 
 import os
+import warnings
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -88,6 +89,20 @@ class IVFClassifDataset(Dataset):
             raise KeyError("No label column found. Expected one of: unified_label, label_id, label")
         labels_series = pd.to_numeric(df[label_col], errors="coerce")
         labels_series = labels_series.fillna(0)
+        # ED3: folder 1 = blastocyst (should be positive), folder 2 = non-blastocyst (negative).
+        # Invert to ensure blastocyst is mapped to 1, non-blastocyst to 0 even if raw labels are 0/1 or 1/2.
+        if "dataset_id" in df.columns:
+            mask_ed3 = df["dataset_id"].astype(str).str.upper() == "ED3"
+            if mask_ed3.any():
+                uniq = sorted(labels_series[mask_ed3].unique())
+                if len(uniq) == 2:
+                    mapping = {uniq[0]: 1.0, uniq[1]: 0.0}
+                    labels_series.loc[mask_ed3] = labels_series.loc[mask_ed3].map(mapping)
+                else:
+                    warnings.warn(
+                        f"ED3 detected but found {len(uniq)} unique labels ({uniq}); cannot invert reliably.",
+                        stacklevel=2,
+                    )
         # If multi-class, binarize: everything > min label is positive
         if labels_series.nunique() > 2:
             min_label = labels_series.min()
