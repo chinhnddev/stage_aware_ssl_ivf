@@ -17,10 +17,10 @@ ssl:
   proj_dim: 256
   pred_dim: 256
   ema_tau: 0.996
-  lr: 0.001
+  lr: 0.0005
   weight_decay: 1.0e-6
   epochs: 100
-  warmup_epochs: 10
+  warmup_epochs: 20
   optimizer: adamw
   scheduler: cosine
   fp16: true
@@ -28,9 +28,9 @@ ssl:
 
 stage:
   enabled: true
-  num_stage_positives: 1   # use a single positive per anchor to reduce noise
-  lambda_stage: 0.2        # softer weighting for stage consistency
-  min_per_stage_in_batch: 2
+  num_stage_positives: 2
+  lambda_stage: 0.08
+  min_per_stage_in_batch: 3
 
 logging:
   out_dir: outputs/ssl_byol_stage
