@@ -139,6 +139,9 @@ def create_supervised_loaders(cfg: Dict) -> Tuple[DataLoader, DataLoader, DataLo
     )
 
     loader_kwargs = dict(batch_size=batch_size, num_workers=num_workers, pin_memory=True)
+    # Allow disabling pin_memory via config when running on CPU-only setups to avoid warnings.
+    if "pin_memory" in data_cfg:
+        loader_kwargs["pin_memory"] = bool(data_cfg["pin_memory"])
     train_loader = DataLoader(train_ds, shuffle=True, drop_last=True, **loader_kwargs)
     val_loader = DataLoader(val_ds, shuffle=False, **loader_kwargs)
     test_loader = DataLoader(test_ds, shuffle=False, **loader_kwargs)

@@ -6,7 +6,8 @@ data:
   use_domain: "hospital"
   img_size: 224
   batch_size: 64
-  num_workers: 12
+  num_workers: 2
+  pin_memory: false
   split:
     make_if_missing: false
     seed: 42
@@ -29,7 +30,7 @@ train:
   lr_head: 1.0e-3
   lr_backbone: 1.0e-4
   weight_decay: 1.0e-6
-  fp16: true
+  fp16: false
   pos_weight: "auto"
   early_stop_patience: 10
   scheduler: "cosine"
