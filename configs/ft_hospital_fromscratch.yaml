@@ -1,4 +1,4 @@
-data:
+﻿data:
   csv_path: "data-curation/metadata_hospital_all_with_split.csv"
   root_map:
     hospital: "/content/data/HungVuong_hospital_dataset/Human embryo image datasets"
@@ -29,9 +29,9 @@ train:
   lr_head: 1.0e-3
   lr_backbone: 1.0e-4
   weight_decay: 1.0e-6
-  fp16: true
+  fp16: false
   pos_weight: "auto"
-  early_stop_patience: 10
+  early_stop_patience: 5
   scheduler: "cosine"
   seed: 42
 
