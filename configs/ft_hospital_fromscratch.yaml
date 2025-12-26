@@ -6,7 +6,8 @@
   use_domain: "hospital"
   img_size: 224
   batch_size: 64
-  num_workers: 12
+  num_workers: 2
+  pin_memory: false
   split:
     make_if_missing: false
     seed: 42
