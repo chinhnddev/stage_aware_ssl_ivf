@@ -3,7 +3,7 @@ data:
   root_map:
     roboflow_ssl: "/content/data/embyro_public_dataset"
   img_size: 224
-  batch_size: 32
+  batch_size: 64
   num_workers: 2
   use_domains: ["roboflow_ssl"]
   use_roles: ["ssl"]
@@ -21,7 +21,7 @@ ssl:
   warmup_epochs: 5
   optimizer: adamw
   scheduler: cosine
-  fp16: false
+  fp16: true
   seed: 42
 
 stage:
@@ -33,4 +33,4 @@ stage:
 logging:
   out_dir: outputs/wp1_ssl_vit
   log_every: 50
-  save_every_epochs: 5
+  save_every_epochs: 2
