@@ -84,6 +84,17 @@ def create_dataloader(cfg: Dict) -> DataLoader:
     img_size = data_cfg["img_size"]
     tfm = build_transforms(img_size)
     use_roles = data_cfg.get("use_roles", ["ssl"])
+    num_workers = data_cfg.get("num_workers", 2)
+    pin_memory = torch.cuda.is_available()
+    persistent_workers = num_workers > 0
+    # Warn on high worker count in Colab
+    if str(Path.cwd()).startswith("/content") and num_workers > 4:
+        print(f"[warn] num_workers={num_workers} may be high on Colab; consider 2–4.")
+    # Warn if data on Drive for I/O slowness
+    for p in data_cfg.get("csv_paths", []):
+        if "/content/drive" in str(p):
+            print("[warn] CSV under /content/drive; consider copying data to /content for faster I/O.")
+            break
     dataset = IVFSSLDataset(
         csv_paths=[Path(p) for p in data_cfg["csv_paths"]],
         transform1=tfm,
@@ -100,9 +111,9 @@ def create_dataloader(cfg: Dict) -> DataLoader:
         dataset,
         batch_size=data_cfg["batch_size"],
         shuffle=True,
-        num_workers=data_cfg["num_workers"],
-        pin_memory=torch.cuda.is_available(),
-        persistent_workers=data_cfg["num_workers"] > 0,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=persistent_workers,
         drop_last=True,
     )
     print(
@@ -115,8 +126,13 @@ def create_dataloader(cfg: Dict) -> DataLoader:
 
 def train(cfg: Dict) -> None:
     set_seed(cfg["ssl"].get("seed", 42))
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"[env] device={device} cuda_available={torch.cuda.is_available()} fp16={cfg['ssl'].get('fp16', False)}")
+    cuda_available = torch.cuda.is_available()
+    device = torch.device("cuda" if cuda_available else "cpu")
+    fp16_enabled = cfg["ssl"].get("fp16", False) and cuda_available
+    if not cuda_available and cfg["ssl"].get("fp16", False):
+        print("[env] device=cpu cuda_available=False fp16=False (forced off)")
+    else:
+        print(f"[env] device={device} cuda_available={cuda_available} fp16={fp16_enabled}")
 
     backbone_name = cfg["ssl"]["backbone"]
     backbone_pretrained = cfg["ssl"].get("pretrained", False)
@@ -140,7 +156,7 @@ def train(cfg: Dict) -> None:
     optimizer = optim.AdamW(
         model.parameters(), lr=cfg["ssl"]["lr"], weight_decay=cfg["ssl"]["weight_decay"]
     )
-    scaler = torch.amp.GradScaler("cuda", enabled=cfg["ssl"].get("fp16", False))
+    scaler = torch.amp.GradScaler("cuda", enabled=fp16_enabled)
 
     out_dir = Path(cfg["logging"]["out_dir"])
     logger = Logger(out_dir / "train.log")
@@ -149,11 +165,27 @@ def train(cfg: Dict) -> None:
     lambda_stage = cfg["stage"]["lambda_stage"] if cfg["stage"]["enabled"] else 0.0
     log_every = cfg["logging"].get("log_every", 50)
     save_every = cfg["logging"].get("save_every_epochs", 10)
+    export_every = cfg["logging"].get("export_encoder_every_epochs", save_every)
     patience = cfg["logging"].get("early_stop_patience")
     best_loss = float("inf")
+    start_epoch = 1
+
+    # Resume support
+    resume_path = cfg.get("logging", {}).get("resume_from")
+    if resume_path:
+        rpath = Path(resume_path)
+        if rpath.exists():
+            ckpt_resume = load_checkpoint(rpath, map_location=device)
+            model.load_state_dict(ckpt_resume["model"])
+            optimizer.load_state_dict(ckpt_resume["optimizer"])
+            start_epoch = int(ckpt_resume.get("epoch", 0)) + 1
+            best_loss = ckpt_resume.get("best_loss", best_loss)
+            print(f"[resume] Loaded {rpath}, starting at epoch {start_epoch}, best_loss={best_loss:.4f}")
+        else:
+            print(f"[warn] resume_from path not found: {rpath}; starting from scratch.")
     epochs_no_improve = 0
 
-    for epoch in range(1, num_epochs + 1):
+    for epoch in range(start_epoch, num_epochs + 1):
         model.train()
         total_loss = 0.0
         total_byol = 0.0
@@ -174,7 +206,7 @@ def train(cfg: Dict) -> None:
                 x1 = x1.to(device, non_blocking=True)
                 x2 = x2.to(device, non_blocking=True)
 
-                with torch.amp.autocast("cuda", enabled=cfg["ssl"].get("fp16", False)):
+                with torch.amp.autocast("cuda", enabled=fp16_enabled):
                     p1, p2, t1, t2 = model(x1, x2)
                     loss_byol = byol_loss(p1, p2, t1, t2)
                     if lambda_stage > 0:
@@ -233,6 +265,7 @@ def train(cfg: Dict) -> None:
                 "model": model.state_dict(),
                 "optimizer": optimizer.state_dict(),
                 "cfg": cfg,
+                "best_loss": best_loss,
             }
             save_checkpoint(best_ckpt, out_dir / "best.ckpt")
             meta = {
@@ -260,8 +293,20 @@ def train(cfg: Dict) -> None:
                 "model": model.state_dict(),
                 "optimizer": optimizer.state_dict(),
                 "cfg": cfg,
+                "best_loss": best_loss,
             }
             save_checkpoint(ckpt, out_dir / f"epoch_{epoch}.ckpt")
+            meta = {
+                "backbone_name": backbone_name,
+                "img_size": cfg["data"]["img_size"],
+                "epoch_saved": epoch,
+                "pretrained": backbone_pretrained,
+                "global_pool": "avg",
+                "num_classes": 0,
+            }
+            export_encoder_ckpt(model.online_backbone, out_dir / "encoder_ssl.pth", meta)
+            sanity_check_strict(backbone_name, out_dir / "encoder_ssl.pth")
+        if epoch % export_every == 0:
             meta = {
                 "backbone_name": backbone_name,
                 "img_size": cfg["data"]["img_size"],
@@ -279,6 +324,7 @@ def train(cfg: Dict) -> None:
         "model": model.state_dict(),
         "optimizer": optimizer.state_dict(),
         "cfg": cfg,
+        "best_loss": best_loss,
     }
     save_checkpoint(ckpt, out_dir / "last.ckpt")
     # Save backbone only with meta
