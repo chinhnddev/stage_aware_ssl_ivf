@@ -6,7 +6,7 @@ data:
     hv_clinical: "/content/data/HungVuong_hospital_dataset/Human embryo image datasets"
   img_size: 224
   batch_size: 64
-  num_workers: 4
+  num_workers: 2
 
 model:
   mode: "ssl"  # imagenet | ssl
