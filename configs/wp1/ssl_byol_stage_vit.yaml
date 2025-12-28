@@ -1,0 +1,36 @@
+data:
+  csv_paths: ["data-curation/metadata_ssl.csv"]
+  root_map:
+    roboflow_ssl: "/content/data/embyro_public_dataset"
+  img_size: 224
+  batch_size: 64
+  num_workers: 2
+  use_domains: ["roboflow_ssl"]
+  use_roles: ["ssl"]
+
+ssl:
+  method: byol
+  backbone: vit_base_patch16_224
+  pretrained: false
+  proj_dim: 256
+  pred_dim: 256
+  ema_tau: 0.996
+  lr: 5.0e-4
+  weight_decay: 1.0e-6
+  epochs: 50
+  warmup_epochs: 5
+  optimizer: adamw
+  scheduler: cosine
+  fp16: true
+  seed: 42
+
+stage:
+  enabled: true
+  num_stage_positives: 2
+  lambda_stage: 0.08
+  min_per_stage_in_batch: 0  # vì code chưa enforce được
+
+logging:
+  out_dir: outputs/wp1_ssl_vit
+  log_every: 50
+  save_every_epochs: 5

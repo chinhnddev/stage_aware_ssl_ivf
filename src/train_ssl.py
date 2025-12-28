@@ -9,6 +9,7 @@ import sys
 import warnings
 from pathlib import Path
 from typing import Dict, List
+import json
 
 import torch
 from torch import nn, optim
@@ -30,6 +31,32 @@ from src.models.byol import BYOL, byol_loss
 from src.utils.checkpoint import save_checkpoint, load_checkpoint
 from src.utils.logger import Logger
 from src.utils.seed import set_seed
+
+
+def export_encoder_ckpt(backbone: nn.Module, out_path: Path, meta: Dict) -> None:
+    """
+    Export backbone-only state dict plus a meta json alongside for downstream loading.
+    """
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    save_checkpoint(backbone.state_dict(), out_path)
+    meta_path = out_path.with_name(out_path.stem + "_meta.json")
+    meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    print(f"[export] saved encoder state to {out_path} and meta to {meta_path}")
+
+
+def sanity_check_strict(backbone_name: str, encoder_path: Path) -> None:
+    """Strict load to ensure exported encoder matches backbone definition."""
+    model, _ = build_backbone(backbone_name, pretrained=False)
+    state = torch.load(encoder_path, map_location="cpu")
+    try:
+        model.load_state_dict(state, strict=True)
+        print("[sanity] encoder_ssl.pth loads with strict=True")
+    except RuntimeError as e:
+        missing, unexpected = model.load_state_dict(state, strict=False)
+        print(f"[sanity] strict load failed: {e}")
+        print(f"  missing: {missing}")
+        print(f"  unexpected: {unexpected}")
+        raise
 
 
 def build_transforms(img_size: int) -> transforms.Compose:
@@ -74,8 +101,8 @@ def create_dataloader(cfg: Dict) -> DataLoader:
         batch_size=data_cfg["batch_size"],
         shuffle=True,
         num_workers=data_cfg["num_workers"],
-        pin_memory=True,
-        persistent_workers=True,
+        pin_memory=torch.cuda.is_available(),
+        persistent_workers=data_cfg["num_workers"] > 0,
         drop_last=True,
     )
     return loader
@@ -85,7 +112,9 @@ def train(cfg: Dict) -> None:
     set_seed(cfg["ssl"].get("seed", 42))
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    backbone, feat_dim = build_backbone(cfg["ssl"]["backbone"])
+    backbone_name = cfg["ssl"]["backbone"]
+    backbone_pretrained = cfg["ssl"].get("pretrained", False)
+    backbone, feat_dim = build_backbone(backbone_name, pretrained=backbone_pretrained)
     model = BYOL(
         backbone=backbone,
         feature_dim=feat_dim,
@@ -196,7 +225,17 @@ def train(cfg: Dict) -> None:
                 "cfg": cfg,
             }
             save_checkpoint(best_ckpt, out_dir / "best.ckpt")
-            logger.log(f"New best loss {best_loss:.4f} at epoch {epoch}, saved best.ckpt")
+            meta = {
+                "backbone_name": backbone_name,
+                "img_size": cfg["data"]["img_size"],
+                "epoch_saved": epoch,
+                "pretrained": backbone_pretrained,
+                "global_pool": "avg",
+                "num_classes": 0,
+            }
+            export_encoder_ckpt(model.online_backbone, out_dir / "encoder_ssl.pth", meta)
+            sanity_check_strict(backbone_name, out_dir / "encoder_ssl.pth")
+            logger.log(f"New best loss {best_loss:.4f} at epoch {epoch}, saved best.ckpt and encoder_ssl.pth")
         else:
             epochs_no_improve += 1
             if patience and epochs_no_improve >= patience:
@@ -213,6 +252,16 @@ def train(cfg: Dict) -> None:
                 "cfg": cfg,
             }
             save_checkpoint(ckpt, out_dir / f"epoch_{epoch}.ckpt")
+            meta = {
+                "backbone_name": backbone_name,
+                "img_size": cfg["data"]["img_size"],
+                "epoch_saved": epoch,
+                "pretrained": backbone_pretrained,
+                "global_pool": "avg",
+                "num_classes": 0,
+            }
+            export_encoder_ckpt(model.online_backbone, out_dir / "encoder_ssl.pth", meta)
+            sanity_check_strict(backbone_name, out_dir / "encoder_ssl.pth")
 
     # Save last
     ckpt = {
@@ -222,8 +271,17 @@ def train(cfg: Dict) -> None:
         "cfg": cfg,
     }
     save_checkpoint(ckpt, out_dir / "last.ckpt")
-    # Save backbone only
-    save_checkpoint(model.online_backbone.state_dict(), out_dir / "encoder_ssl.pth")
+    # Save backbone only with meta
+    meta = {
+        "backbone_name": backbone_name,
+        "img_size": cfg["data"]["img_size"],
+        "epoch_saved": num_epochs,
+        "pretrained": backbone_pretrained,
+        "global_pool": "avg",
+        "num_classes": 0,
+    }
+    export_encoder_ckpt(model.online_backbone, out_dir / "encoder_ssl.pth", meta)
+    sanity_check_strict(backbone_name, out_dir / "encoder_ssl.pth")
     logger.log(f"Saved encoder to {out_dir/'encoder_ssl.pth'}")
     logger.close()
 
@@ -237,11 +295,22 @@ def export_encoder(ckpt_path: Path, out_path: Path) -> None:
     print(f"Exported encoder weights to {out_path}")
 
 
+def sanity_check_encoder(cfg: Dict, encoder_path: Path) -> None:
+    """Load backbone-only checkpoint with strict=True to verify compatibility."""
+    backbone_name = cfg["ssl"]["backbone"]
+    model, _ = build_backbone(backbone_name, pretrained=False)
+    state = torch.load(encoder_path, map_location="cpu")
+    missing, unexpected = model.load_state_dict(state, strict=True)
+    print("Encoder checkpoint loads successfully with strict=True")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Stage-aware BYOL pretraining.")
     parser.add_argument("--config", type=Path, help="Path to YAML config.")
     parser.add_argument("--export_encoder", type=Path, help="Checkpoint to export backbone from.")
     parser.add_argument("--out", type=Path, help="Output path for exported encoder.")
+    parser.add_argument("--sanity_check_encoder", action="store_true", help="Run strict load on encoder_ssl.pth and exit.")
+    parser.add_argument("--encoder_path", type=Path, help="Path to encoder_ssl.pth (defaults to config logging.out_dir/encoder_ssl.pth).")
     return parser.parse_args()
 
 
@@ -253,6 +322,10 @@ def main() -> None:
     if not args.config:
         raise ValueError("Config path is required for training.")
     cfg = load_config(args.config)
+    if args.sanity_check_encoder:
+        enc_path = args.encoder_path or (Path(cfg["logging"]["out_dir"]) / "encoder_ssl.pth")
+        sanity_check_encoder(cfg, enc_path)
+        return
     train(cfg)
 
 
