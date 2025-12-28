@@ -3,7 +3,7 @@ data:
   root_map:
     roboflow_ssl: "/content/data/embyro_public_dataset"
   img_size: 224
-  batch_size: 64
+  batch_size: 32
   num_workers: 2
   use_domains: ["roboflow_ssl"]
   use_roles: ["ssl"]

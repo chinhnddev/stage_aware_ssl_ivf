@@ -105,12 +105,18 @@ def create_dataloader(cfg: Dict) -> DataLoader:
         persistent_workers=data_cfg["num_workers"] > 0,
         drop_last=True,
     )
+    print(
+        f"[dataloader] samples={len(dataset)} batches={len(loader)} "
+        f"batch_size={data_cfg['batch_size']} num_workers={data_cfg['num_workers']} "
+        f"pin_memory={torch.cuda.is_available()} persistent_workers={data_cfg['num_workers']>0}"
+    )
     return loader
 
 
 def train(cfg: Dict) -> None:
     set_seed(cfg["ssl"].get("seed", 42))
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"[env] device={device} cuda_available={torch.cuda.is_available()} fp16={cfg['ssl'].get('fp16', False)}")
 
     backbone_name = cfg["ssl"]["backbone"]
     backbone_pretrained = cfg["ssl"].get("pretrained", False)
@@ -155,60 +161,64 @@ def train(cfg: Dict) -> None:
         total_stage_pos_anchors = 0
         pbar = tqdm(enumerate(loader), total=len(loader), desc=f"Epoch {epoch}")
         dataset = loader.dataset
-        for step, (x1, x2, stage_ids, pos_lists, _) in pbar:
-            # Normalize pos_lists to list of list[int] to avoid tensor membership issues
-            if isinstance(pos_lists, torch.Tensor):
-                pos_lists = pos_lists.tolist()
-            else:
-                pos_lists = [
-                    pl.tolist() if isinstance(pl, torch.Tensor) else pl  # type: ignore[union-attr]
-                    for pl in pos_lists
-                ]
-            x1 = x1.to(device, non_blocking=True)
-            x2 = x2.to(device, non_blocking=True)
-
-            with torch.amp.autocast("cuda", enabled=cfg["ssl"].get("fp16", False)):
-                p1, p2, t1, t2 = model(x1, x2)
-                loss_byol = byol_loss(p1, p2, t1, t2)
-                if lambda_stage > 0:
-                    # Collect unique positive indices across the batch
-                    all_pos_indices = {pi for pis in pos_lists for pi in pis}
-                    pos_emb_dict: Dict[int, torch.Tensor] = {}
-                    if all_pos_indices:
-                        with torch.no_grad():
-                            pos_imgs = torch.stack([dataset.get_view(pi, view=1) for pi in all_pos_indices]).to(
-                                device, non_blocking=True
-                            )
-                            t_pos = model.target_projector(model.target_backbone(pos_imgs))
-                            t_pos = F.normalize(t_pos, dim=-1)
-                            pos_emb_dict = {pi: emb for pi, emb in zip(all_pos_indices, t_pos)}
-
-                    anchor_z = p1
-                    stage_l, stage_pos_anchors = stage_loss_from_pairs(anchor_z, pos_emb_dict, pos_lists)
+        try:
+            for step, (x1, x2, stage_ids, pos_lists, _) in pbar:
+                # Normalize pos_lists to list of list[int] to avoid tensor membership issues
+                if isinstance(pos_lists, torch.Tensor):
+                    pos_lists = pos_lists.tolist()
                 else:
-                    stage_l = torch.tensor(0.0, device=device)
-                    stage_pos_anchors = 0
+                    pos_lists = [
+                        pl.tolist() if isinstance(pl, torch.Tensor) else pl  # type: ignore[union-attr]
+                        for pl in pos_lists
+                    ]
+                x1 = x1.to(device, non_blocking=True)
+                x2 = x2.to(device, non_blocking=True)
 
-                loss = loss_byol + lambda_stage * stage_l
+                with torch.amp.autocast("cuda", enabled=cfg["ssl"].get("fp16", False)):
+                    p1, p2, t1, t2 = model(x1, x2)
+                    loss_byol = byol_loss(p1, p2, t1, t2)
+                    if lambda_stage > 0:
+                        # Collect unique positive indices across the batch
+                        all_pos_indices = {pi for pis in pos_lists for pi in pis}
+                        pos_emb_dict: Dict[int, torch.Tensor] = {}
+                        if all_pos_indices:
+                            with torch.no_grad():
+                                pos_imgs = torch.stack([dataset.get_view(pi, view=1) for pi in all_pos_indices]).to(
+                                    device, non_blocking=True
+                                )
+                                t_pos = model.target_projector(model.target_backbone(pos_imgs))
+                                t_pos = F.normalize(t_pos, dim=-1)
+                                pos_emb_dict = {pi: emb for pi, emb in zip(all_pos_indices, t_pos)}
 
-            optimizer.zero_grad()
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-            model.update_moving_average()
+                        anchor_z = p1
+                        stage_l, stage_pos_anchors = stage_loss_from_pairs(anchor_z, pos_emb_dict, pos_lists)
+                    else:
+                        stage_l = torch.tensor(0.0, device=device)
+                        stage_pos_anchors = 0
 
-            total_loss += loss.item()
-            total_byol += loss_byol.item()
-            total_stage += stage_l.item()
-            total_stage_pos_anchors += stage_pos_anchors
+                    loss = loss_byol + lambda_stage * stage_l
 
-            if (step + 1) % log_every == 0:
-                pbar.set_postfix(
-                    loss=total_loss / (step + 1),
-                    byol=total_byol / (step + 1),
-                    stage=total_stage / (step + 1),
-                    stage_pos=total_stage_pos_anchors / (step + 1),
-                )
+                optimizer.zero_grad()
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+                model.update_moving_average()
+
+                total_loss += loss.item()
+                total_byol += loss_byol.item()
+                total_stage += stage_l.item()
+                total_stage_pos_anchors += stage_pos_anchors
+
+                if (step + 1) % log_every == 0:
+                    pbar.set_postfix(
+                        loss=total_loss / (step + 1),
+                        byol=total_byol / (step + 1),
+                        stage=total_stage / (step + 1),
+                        stage_pos=total_stage_pos_anchors / (step + 1),
+                    )
+        except KeyboardInterrupt:
+            print("[info] Training interrupted by user.")
+            break
 
         epoch_loss = total_loss / len(loader)
         logger.log(
