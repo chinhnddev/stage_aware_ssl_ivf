@@ -9,20 +9,12 @@ data:
   num_workers: 2
 
 model:
-  mode: "ssl"  # imagenet | ssl
-  backbone_name: "vit_base_patch16_224"  # or "resnet50"
-
-  # IMPORTANT:
-  # - imagenet mode: pretrained=true, ssl_checkpoint ignored
-  # - ssl mode: pretrained must be false to avoid mixing ImageNet weights + SSL weights
+  mode: "ssl"
+  backbone_name: "vit_base_patch16_224"
   pretrained: false
+  ssl_checkpoint: "outputs/ssl_byol_stage/encoder_ssl.pth"
+  from_byol_ckpt: true
 
-  # Legacy field (keep for backward compatibility; should be empty in new runs)
-  checkpoint: ""
-
-  # Used only when mode=ssl
-  ssl_checkpoint: "/content/drive/MyDrive/EMBRYO_CLASSIFICATION/outputs/wp1_ssl/best_encoder.pth"
-  from_byol_ckpt: false  # set true ONLY if your SSL ckpt is saved in BYOL wrapper format
 
 train:
   epochs: 10
