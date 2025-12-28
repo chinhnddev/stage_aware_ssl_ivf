@@ -118,8 +118,8 @@ def create_dataloader(cfg: Dict) -> DataLoader:
     )
     print(
         f"[dataloader] samples={len(dataset)} batches={len(loader)} "
-        f"batch_size={data_cfg['batch_size']} num_workers={data_cfg['num_workers']} "
-        f"pin_memory={torch.cuda.is_available()} persistent_workers={data_cfg['num_workers']>0}"
+        f"batch_size={data_cfg['batch_size']} num_workers={num_workers} "
+        f"pin_memory={pin_memory} persistent_workers={persistent_workers}"
     )
     return loader
 
@@ -175,7 +175,7 @@ def train(cfg: Dict) -> None:
     if resume_path:
         rpath = Path(resume_path)
         if rpath.exists():
-            ckpt_resume = load_checkpoint(rpath, map_location=device)
+            ckpt_resume = load_checkpoint(rpath, map_location="cpu")
             model.load_state_dict(ckpt_resume["model"])
             optimizer.load_state_dict(ckpt_resume["optimizer"])
             start_epoch = int(ckpt_resume.get("epoch", 0)) + 1
@@ -193,6 +193,7 @@ def train(cfg: Dict) -> None:
         total_stage_pos_anchors = 0
         pbar = tqdm(enumerate(loader), total=len(loader), desc=f"Epoch {epoch}")
         dataset = loader.dataset
+        interrupted = False
         try:
             for step, (x1, x2, stage_ids, pos_lists, _) in pbar:
                 # Normalize pos_lists to list of list[int] to avoid tensor membership issues
@@ -250,13 +251,27 @@ def train(cfg: Dict) -> None:
                     )
         except KeyboardInterrupt:
             print("[info] Training interrupted by user.")
-            break
+            interrupted = True
+
+        if interrupted:
+            ckpt = {
+                "epoch": epoch,
+                "model": model.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "cfg": cfg,
+                "best_loss": best_loss,
+            }
+            save_checkpoint(ckpt, out_dir / "last.ckpt")
+            print(f"[info] Saved last.ckpt at epoch {epoch} before exit.")
+            logger.close()
+            return
 
         epoch_loss = total_loss / len(loader)
         logger.log(
             f"Epoch {epoch}: loss={epoch_loss:.4f}, byol={total_byol/len(loader):.4f}, stage={total_stage/len(loader):.4f}"
         )
 
+        did_export = False
         if epoch_loss < best_loss:
             best_loss = epoch_loss
             epochs_no_improve = 0
@@ -279,6 +294,7 @@ def train(cfg: Dict) -> None:
             export_encoder_ckpt(model.online_backbone, out_dir / "encoder_ssl.pth", meta)
             sanity_check_strict(backbone_name, out_dir / "encoder_ssl.pth")
             logger.log(f"New best loss {best_loss:.4f} at epoch {epoch}, saved best.ckpt and encoder_ssl.pth")
+            did_export = True
         else:
             epochs_no_improve += 1
             if patience and epochs_no_improve >= patience:
@@ -296,17 +312,7 @@ def train(cfg: Dict) -> None:
                 "best_loss": best_loss,
             }
             save_checkpoint(ckpt, out_dir / f"epoch_{epoch}.ckpt")
-            meta = {
-                "backbone_name": backbone_name,
-                "img_size": cfg["data"]["img_size"],
-                "epoch_saved": epoch,
-                "pretrained": backbone_pretrained,
-                "global_pool": "avg",
-                "num_classes": 0,
-            }
-            export_encoder_ckpt(model.online_backbone, out_dir / "encoder_ssl.pth", meta)
-            sanity_check_strict(backbone_name, out_dir / "encoder_ssl.pth")
-        if epoch % export_every == 0:
+        if (not did_export) and (epoch % export_every == 0 or epoch == num_epochs):
             meta = {
                 "backbone_name": backbone_name,
                 "img_size": cfg["data"]["img_size"],
