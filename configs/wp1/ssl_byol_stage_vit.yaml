@@ -21,7 +21,7 @@ ssl:
   warmup_epochs: 5
   optimizer: adamw
   scheduler: cosine
-  fp16: true
+  fp16: false
   seed: 42
 
 stage:
