@@ -109,12 +109,19 @@ class IVFClassifDataset(Dataset):
         labels_series = pd.to_numeric(df[label_col], errors="coerce")
         missing_labels = labels_series.isna()
         if missing_labels.any():
-            warnings.warn(
-                f"Dropping {missing_labels.sum()} rows without labels from {csv_path}; check role/domain filtering.",
-                stacklevel=2,
-            )
+            dropped = int(missing_labels.sum())
             df = df[~missing_labels].reset_index(drop=True)
             labels_series = labels_series[~missing_labels].reset_index(drop=True)
+            print(
+                f"[IVFClassifDataset] Dropped {dropped} rows without labels "
+                f"(using label_col='{label_col}'); remaining {len(df)} samples."
+            )
+            if len(df) == 0:
+                raise ValueError(
+                    "No labeled samples remain after filtering missing labels. "
+                    "crossdomain_test csv must contain label/unified_label for metric computation, "
+                    "or enable inference-only mode."
+                )
         # ED3: folder 1 = blastocyst (should be positive), folder 2 = non-blastocyst (negative).
         # Invert to ensure blastocyst is mapped to 1, non-blastocyst to 0 even if raw labels are 0/1 or 1/2.
         if "dataset_id" in df.columns:

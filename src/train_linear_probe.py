@@ -21,6 +21,33 @@ from src.data.supervised_dataloader import _make_transforms
 from src.models.classifier import LinearHead
 from src.models.frozen_backbone import build_frozen_backbone, FrozenBackboneEncoder
 from src.utils.metrics import compute_classification_metrics, find_best_threshold
+from typing import List
+
+
+def _find_ssl_checkpoint(project_root: Path) -> Path:
+    """Search for SSL checkpoints when none is provided explicitly."""
+    preferred = list((project_root / "outputs" / "wp1_ssl").glob("*.pth"))
+    if len(preferred) == 1:
+        print(f"[warn] ssl_checkpoint missing; using found checkpoint: {preferred[0]}")
+        return preferred[0]
+    if len(preferred) > 1:
+        ckpts = "\n  ".join(str(p) for p in preferred)
+        raise FileNotFoundError(
+            f"Multiple SSL checkpoints found under outputs/wp1_ssl:\n  {ckpts}\n"
+            "Please set model.ssl_checkpoint explicitly."
+        )
+    # fallback: any .pth under outputs
+    any_ckpts = list((project_root / "outputs").rglob("*.pth"))
+    if len(any_ckpts) == 1:
+        print(f"[warn] ssl_checkpoint missing; using found checkpoint: {any_ckpts[0]}")
+        return any_ckpts[0]
+    if len(any_ckpts) > 1:
+        ckpts = "\n  ".join(str(p) for p in any_ckpts)
+        raise FileNotFoundError(
+            f"Multiple SSL checkpoints found under outputs/:\n  {ckpts}\n"
+            "Please set model.ssl_checkpoint explicitly."
+        )
+    raise FileNotFoundError("No SSL checkpoint found under outputs/. Set model.ssl_checkpoint explicitly.")
 from src.utils.seed import set_seed
 
 
@@ -28,7 +55,14 @@ def build_loaders(cfg: Dict) -> Tuple[DataLoader, DataLoader, DataLoader, DataLo
     data_cfg = cfg["data"]
     img_size = data_cfg["img_size"]
     batch_size = data_cfg.get("batch_size", 64)
-    num_workers = data_cfg.get("num_workers", 4)
+    # Default to 2 workers if missing; warn on Colab when >2.
+    if "num_workers" not in data_cfg:
+        num_workers = 2
+        print("[data] num_workers not set; defaulting to 2 for Colab stability.")
+    else:
+        num_workers = data_cfg.get("num_workers", 4)
+        if num_workers > 2 and str(Path.cwd()).startswith("/content"):
+            print(f"[warn] num_workers={num_workers} may be too high on Colab; consider setting num_workers=2.")
     root_map = data_cfg["root_map"]
     sup_csv = Path(data_cfg["supervised_csv"])
     cross_csv = Path(data_cfg["cross_csv"])
@@ -78,10 +112,22 @@ def build_model(cfg: Dict, device: torch.device) -> Tuple[FrozenBackboneEncoder,
         ).to(device)
     elif mode == "ssl":
         if not ssl_ckpt:
-            raise ValueError("mode=ssl requires model.ssl_checkpoint to be set.")
-        ckpt_path = Path(ssl_ckpt)
-        if not ckpt_path.exists():
-            raise FileNotFoundError(f"SSL checkpoint not found: {ckpt_path}")
+            ckpt_path = _find_ssl_checkpoint(Path.cwd())
+        else:
+            ckpt_path = Path(ssl_ckpt)
+            if not ckpt_path.exists():
+                # Try auto-search before failing
+                print(f"[warn] SSL checkpoint not found at {ckpt_path}; searching outputs/ ...")
+                try:
+                    ckpt_path = _find_ssl_checkpoint(Path.cwd())
+                except FileNotFoundError as e:
+                    cwd = Path.cwd()
+                    raise FileNotFoundError(
+                        f"SSL checkpoint not found: {ckpt_path}\n"
+                        f"Current working directory: {cwd}\n"
+                        f"Try: ls -lah {ckpt_path.parent} ; ls -lah outputs/wp1_ssl\n"
+                        f"Details: {e}"
+                    )
         # pretrained=False to avoid mixing ImageNet and SSL weights
         backbone = build_frozen_backbone(
             name=backbone_name,
