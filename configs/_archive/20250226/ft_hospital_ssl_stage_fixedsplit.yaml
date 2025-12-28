@@ -1,13 +1,13 @@
+# Archived: not used by final SAGE-MoE pipeline
 data:
-  csv_path: "data-curation/metadata_hospital_all_with_split.csv"
+  csv_path: "data-curation/metadata_supervised.csv"
   root_map:
-    hospital: "/content/data/HungVuong_hospital_dataset/Human embryo image datasets"
-    public: "/content/data/embyro_public_dataset"
-  use_domain: "hospital"
+    hv_kaggle: "/content/drive/MyDrive/EMBRYO_CLASSIFICATION/stage_aware_ssl_ivf/data/hv_hospital_day3_day5"
+  use_domain: "hv_kaggle"
+  role: "supervised"
   img_size: 224
   batch_size: 64
-  num_workers: 2
-  pin_memory: false
+  num_workers: 8
   split:
     make_if_missing: false
     seed: 42
@@ -30,7 +30,7 @@ train:
   lr_head: 1.0e-3
   lr_backbone: 1.0e-4
   weight_decay: 1.0e-6
-  fp16: false
+  fp16: true
   pos_weight: "auto"
   early_stop_patience: 10
   scheduler: "cosine"
@@ -41,5 +41,5 @@ eval:
   tune_threshold_on_val: true
 
 logging:
-  out_dir: "outputs/ft/run1_ssl_stage"
+  out_dir: "outputs/ft/run_ssl_stage_fixedsplit"
   select_metric: "val_auprc"

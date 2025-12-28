@@ -1,0 +1,19 @@
+wp3:
+  token_dim: 512
+  adapter:
+    use_adapter: true
+    use_domain_token: true
+    use_stage_token: true
+  morph:
+    num_experts: 4
+    num_heads: 4
+    use_sin: true
+  gen:
+    depth: 2
+    num_heads: 4
+    dim_ff: 512
+    use_stage_cross_attn: true
+    use_domain_align: true
+    domain_alignment: "grl"
+    num_domains: 3
+    grl_lambda: 1.0

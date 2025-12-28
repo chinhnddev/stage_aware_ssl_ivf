@@ -1,0 +1,36 @@
+data:
+  supervised_csv: "data-curation/metadata_supervised.csv"
+  cross_csv: "data-curation/metadata_crossdomain_test.csv"
+  root_map:
+    hv_kaggle: "/content/data/hv_hospital_day3_day5"
+    hv_clinical: "/content/data/HungVuong_hospital_dataset/Human embryo image datasets"
+  img_size: 224
+  batch_size: 64
+  num_workers: 4
+
+model:
+  mode: "ssl"  # imagenet | ssl
+  backbone_name: "vit_base_patch16_224"  # or "resnet50"
+
+  # IMPORTANT:
+  # - imagenet mode: pretrained=true, ssl_checkpoint ignored
+  # - ssl mode: pretrained must be false to avoid mixing ImageNet weights + SSL weights
+  pretrained: false
+
+  # Legacy field (keep for backward compatibility; should be empty in new runs)
+  checkpoint: ""
+
+  # Used only when mode=ssl
+  ssl_checkpoint: "/content/drive/MyDrive/EMBRYO_CLASSIFICATION/outputs/wp1_ssl/best_encoder.pth"
+  from_byol_ckpt: false  # set true ONLY if your SSL ckpt is saved in BYOL wrapper format
+
+train:
+  epochs: 10
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  fp16: false
+  seed: 42
+
+logging:
+  run_name: "wp2_linear_probe"
+  out_dir: "outputs/wp2_linear_probe"

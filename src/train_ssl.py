@@ -56,6 +56,7 @@ def create_dataloader(cfg: Dict) -> DataLoader:
     data_cfg = cfg["data"]
     img_size = data_cfg["img_size"]
     tfm = build_transforms(img_size)
+    use_roles = data_cfg.get("use_roles", ["ssl"])
     dataset = IVFSSLDataset(
         csv_paths=[Path(p) for p in data_cfg["csv_paths"]],
         transform1=tfm,
@@ -63,6 +64,7 @@ def create_dataloader(cfg: Dict) -> DataLoader:
         root_dir=Path(data_cfg["root_dir"]) if data_cfg.get("root_dir") else None,
         root_map=data_cfg.get("root_map"),
         use_domains=data_cfg.get("use_domains"),
+        use_roles=use_roles,
         num_stage_positives=cfg["stage"]["num_stage_positives"],
     )
     # Note: shuffle=True with the default sampler; no stage-balanced sampler is implemented,

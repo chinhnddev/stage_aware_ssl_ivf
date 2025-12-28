@@ -1,9 +1,10 @@
+# Archived: not used by final SAGE-MoE pipeline
 data:
-  csv_path: "data-curation/metadata_hospital_all_with_split.csv"
+  csv_path: "data-curation/metadata_supervised.csv"
   root_map:
-    hospital: "/content/data/HungVuong_hospital_dataset/Human embryo image datasets"
-    public: "/content/data/embyro_public_dataset"
-  use_domain: "hospital"
+    hv_kaggle: "/content/data/hv_hospital_day3_day5"
+  use_domain: "hv_kaggle"
+  role: "supervised"
   img_size: 224
   batch_size: 64
   num_workers: 12

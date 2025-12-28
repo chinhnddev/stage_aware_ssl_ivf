@@ -40,10 +40,10 @@ def _make_transforms(img_size: int, train: bool):
 
 
 def _get_label_series(df: pd.DataFrame) -> pd.Series:
-    for col in ["unified_label", "label_id", "label"]:
+    for col in ["quality_label", "unified_label", "label_id", "label"]:
         if col in df.columns:
             return df[col]
-    raise KeyError("No label column found. Expected one of: unified_label, label_id, label")
+    raise KeyError("No label column found. Expected one of: quality_label, unified_label, label_id, label")
 
 
 def _ensure_split(cfg_data: Dict) -> Path:
@@ -53,6 +53,13 @@ def _ensure_split(cfg_data: Dict) -> Path:
     """
     csv_path = Path(cfg_data["csv_path"])
     df = pd.read_csv(csv_path)
+    target_role = cfg_data.get("role", "supervised")
+    if target_role and "role" in df.columns:
+        role_mask = df["role"] == target_role
+        other_roles = df[~role_mask].reset_index(drop=True)
+        df = df[role_mask].reset_index(drop=True)
+    else:
+        other_roles = pd.DataFrame()
     use_domain = cfg_data.get("use_domain")
     subset = df[df["domain"] == use_domain] if use_domain else df
 
@@ -96,7 +103,7 @@ def _ensure_split(cfg_data: Dict) -> Path:
     df_train["split"] = "train"
     df_val["split"] = "val"
     df_test["split"] = "test"
-    out_df = pd.concat([df_train, df_val, df_test], ignore_index=True)
+    out_df = pd.concat([df_train, df_val, df_test, other_roles], ignore_index=True)
     out_path = csv_path.parent / f"{csv_path.stem}_with_split.csv"
     out_df.to_csv(out_path, index=False)
     print(f"[split] Created split at {out_path}")
@@ -110,6 +117,7 @@ def create_supervised_loaders(cfg: Dict) -> Tuple[DataLoader, DataLoader, DataLo
     batch_size = data_cfg["batch_size"]
     num_workers = data_cfg["num_workers"]
     use_domain = data_cfg.get("use_domain")
+    use_role = data_cfg.get("role", "supervised")
     root_map = data_cfg.get("root_map")
     root_dir = Path(data_cfg["root_dir"]) if data_cfg.get("root_dir") else None
 
@@ -119,6 +127,7 @@ def create_supervised_loaders(cfg: Dict) -> Tuple[DataLoader, DataLoader, DataLo
         root_dir=root_dir,
         root_map=root_map,
         use_domain=use_domain,
+        use_role=use_role,
         transform=_make_transforms(img_size, train=True),
     )
     val_ds = IVFClassifDataset(
@@ -127,6 +136,7 @@ def create_supervised_loaders(cfg: Dict) -> Tuple[DataLoader, DataLoader, DataLo
         root_dir=root_dir,
         root_map=root_map,
         use_domain=use_domain,
+        use_role=use_role,
         transform=_make_transforms(img_size, train=False),
     )
     test_ds = IVFClassifDataset(
@@ -135,6 +145,7 @@ def create_supervised_loaders(cfg: Dict) -> Tuple[DataLoader, DataLoader, DataLo
         root_dir=root_dir,
         root_map=root_map,
         use_domain=use_domain,
+        use_role=use_role,
         transform=_make_transforms(img_size, train=False),
     )
 
