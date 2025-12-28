@@ -185,6 +185,7 @@ def train(cfg: Dict) -> None:
             print(f"[warn] resume_from path not found: {rpath}; starting from scratch.")
     epochs_no_improve = 0
 
+    last_epoch_run = start_epoch - 1
     for epoch in range(start_epoch, num_epochs + 1):
         model.train()
         total_loss = 0.0
@@ -254,6 +255,7 @@ def train(cfg: Dict) -> None:
             interrupted = True
 
         if interrupted:
+            last_epoch_run = epoch
             ckpt = {
                 "epoch": epoch,
                 "model": model.state_dict(),
@@ -267,6 +269,7 @@ def train(cfg: Dict) -> None:
             return
 
         epoch_loss = total_loss / len(loader)
+        last_epoch_run = epoch
         logger.log(
             f"Epoch {epoch}: loss={epoch_loss:.4f}, byol={total_byol/len(loader):.4f}, stage={total_stage/len(loader):.4f}"
         )
@@ -326,7 +329,7 @@ def train(cfg: Dict) -> None:
 
     # Save last
     ckpt = {
-        "epoch": num_epochs,
+        "epoch": last_epoch_run,
         "model": model.state_dict(),
         "optimizer": optimizer.state_dict(),
         "cfg": cfg,
@@ -337,7 +340,7 @@ def train(cfg: Dict) -> None:
     meta = {
         "backbone_name": backbone_name,
         "img_size": cfg["data"]["img_size"],
-        "epoch_saved": num_epochs,
+        "epoch_saved": last_epoch_run,
         "pretrained": backbone_pretrained,
         "global_pool": "avg",
         "num_classes": 0,
