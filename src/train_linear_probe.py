@@ -66,11 +66,32 @@ def build_loaders(cfg: Dict) -> Tuple[DataLoader, DataLoader, DataLoader, DataLo
         if num_workers > 2 and str(Path.cwd()).startswith("/content"):
             print(f"[warn] num_workers={num_workers} may be too high on Colab; consider setting num_workers=2.")
     root_map = data_cfg["root_map"]
+    # Validate root_map paths exist
+    for k, v in root_map.items():
+        root_path = Path(v)
+        if not root_path.exists():
+            raise RuntimeError(f"[error] root_map['{k}'] does not exist: {root_path}. Check dataset location/mount.")
     sup_csv = Path(data_cfg["supervised_csv"])
     cross_csv = Path(data_cfg["cross_csv"])
 
     train_tf = _make_transforms(img_size, train=True)
     eval_tf = _make_transforms(img_size, train=False)
+
+    def _sample_exists(csv_path: Path, domain: str) -> None:
+        import pandas as pd
+        df = pd.read_csv(csv_path)
+        df_dom = df[df["domain"] == domain]
+        sample = df_dom.sample(n=min(10, len(df_dom)), random_state=0) if len(df_dom) > 0 else df_dom
+        for _, row in sample.iterrows():
+            full = Path(root_map[domain]) / row["image_path"]
+            if not full.exists():
+                raise RuntimeError(
+                    f"[error] missing file for domain={domain} from {csv_path}: image_path='{row['image_path']}' -> {full}"
+                )
+
+    # Fail-fast existence check on samples
+    _sample_exists(sup_csv, "hv_kaggle")
+    _sample_exists(cross_csv, "hv_clinical")
 
     def make_loader(split: str, csv_path: Path, domain: str, role: str, tf, shuffle: bool) -> DataLoader:
         ds = IVFClassifDataset(
@@ -82,13 +103,23 @@ def build_loaders(cfg: Dict) -> Tuple[DataLoader, DataLoader, DataLoader, DataLo
             label_col=label_col,
             transform=tf,
         )
-        return DataLoader(
+        loader = DataLoader(
             ds,
             batch_size=batch_size,
             shuffle=shuffle,
             num_workers=num_workers,
             pin_memory=True,
         )
+        # Log dataset sanity
+        try:
+            sample_path = ds.samples[0][0] if len(ds.samples) > 0 else "<empty>"
+            print(
+                f"[data-check] split={split} domain={domain} role={role} "
+                f"root={root_map[domain]} samples={len(ds)} example={sample_path}"
+            )
+        except Exception:
+            print(f"[data-check] split={split} domain={domain} role={role} root={root_map[domain]} samples={len(ds)}")
+        return loader
 
     train_loader = make_loader("train", sup_csv, "hv_kaggle", "supervised", train_tf, shuffle=True)
     val_loader = make_loader("val", sup_csv, "hv_kaggle", "supervised", eval_tf, shuffle=False)
