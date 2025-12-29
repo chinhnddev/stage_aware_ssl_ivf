@@ -28,6 +28,7 @@ class IVFClassifDataset(Dataset):
         root_map: Optional[Dict[str, Union[str, Path]]] = None,
         use_domain: Optional[str] = None,
         use_role: Optional[str] = None,
+        label_col: Optional[str] = None,
         transform=None,
     ) -> None:
         self.root_dir = Path(root_dir) if root_dir else None
@@ -99,11 +100,10 @@ class IVFClassifDataset(Dataset):
             print(f"[IVFClassifDataset] Skipped {skipped} missing files; remaining {len(df)} samples.")
         if len(df) == 0:
             raise ValueError(f"No samples remain after filtering missing files in {csv_path}")
-        label_col = None
-        for col in ["quality_label", "label_id", "unified_label", "label"]:
-            if col in df.columns:
-                label_col = col
-                break
+        # Resolve label column: prefer explicitly provided, else fallback priority.
+        label_candidates = [label_col] if label_col else []
+        label_candidates += ["quality_label", "label_id", "unified_label", "label"]
+        label_col = next((c for c in label_candidates if c and c in df.columns), None)
         if label_col is None:
             raise KeyError("No label column found. Expected one of: quality_label, label_id, unified_label, label")
         labels_series = pd.to_numeric(df[label_col], errors="coerce")

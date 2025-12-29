@@ -1,6 +1,8 @@
 data:
   supervised_csv: "data-curation/metadata_supervised.csv"
-  cross_csv: "data-curation/metadata_crossdomain_test.csv"
+  cross_csv: "data-curation/metadata_crossdomain_test_quality.csv"
+  label_col: "quality_label"
+  task: "quality_binary"
   root_map:
     hv_kaggle: "/content/data/hv_hospital_day3_day5"
     hv_clinical: "/content/data/HungVuong_hospital_dataset/Human embryo image datasets"

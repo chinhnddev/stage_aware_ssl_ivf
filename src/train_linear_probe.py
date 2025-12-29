@@ -21,6 +21,7 @@ from src.data.supervised_dataloader import _make_transforms
 from src.models.classifier import LinearHead
 from src.models.frozen_backbone import build_frozen_backbone, FrozenBackboneEncoder
 from src.utils.metrics import compute_classification_metrics, find_best_threshold
+from tools.validate_wp2_protocol import validate as validate_wp2_protocol
 from typing import List
 
 
@@ -55,6 +56,7 @@ def build_loaders(cfg: Dict) -> Tuple[DataLoader, DataLoader, DataLoader, DataLo
     data_cfg = cfg["data"]
     img_size = data_cfg["img_size"]
     batch_size = data_cfg.get("batch_size", 64)
+    label_col = data_cfg.get("label_col", "quality_label")
     # Default to 2 workers if missing; warn on Colab when >2.
     if "num_workers" not in data_cfg:
         num_workers = 2
@@ -77,6 +79,7 @@ def build_loaders(cfg: Dict) -> Tuple[DataLoader, DataLoader, DataLoader, DataLo
             root_map=root_map,
             use_domain=domain,
             use_role=role,
+            label_col=label_col,
             transform=tf,
         )
         return DataLoader(
@@ -137,7 +140,8 @@ def build_model(cfg: Dict, device: torch.device) -> Tuple[FrozenBackboneEncoder,
         ).to(device)
     else:
         raise ValueError(f"Unsupported model.mode='{mode}' (expected imagenet or ssl)")
-    print(f"[model] mode={mode} backbone={backbone_name} ssl_checkpoint={ssl_ckpt or 'None'}")
+    resolved_ckpt = ssl_ckpt if ssl_ckpt else (str(ckpt_path) if 'ckpt_path' in locals() else 'None')
+    print(f"[model] mode={mode} backbone={backbone_name} ssl_checkpoint={resolved_ckpt}")
     head = LinearHead(backbone.feature_dim).to(device)
     return backbone, head
 
@@ -150,7 +154,7 @@ def eval_model(backbone: FrozenBackboneEncoder, head: nn.Module, loader: DataLoa
     with torch.no_grad():
         for x, y in loader:
             x = x.to(device, non_blocking=True)
-            y = y.to(device, non_blocking=True).view(-1)  # ensure 1D labels
+            y = y.to(device, non_blocking=True).view(-1).float()  # ensure 1D float labels
             feats = backbone(x)
             logits = head(feats).view(-1)  # ensure 1D logits
             y_true.append(y.cpu())
@@ -168,7 +172,7 @@ def collect_scores(backbone: FrozenBackboneEncoder, head: nn.Module, loader: Dat
     with torch.no_grad():
         for x, y in loader:
             x = x.to(device, non_blocking=True)
-            y = y.to(device, non_blocking=True).view(-1)  # ensure 1D labels
+            y = y.to(device, non_blocking=True).view(-1).float()  # ensure 1D float labels
             feats = backbone(x)
             logits = head(feats).view(-1)  # ensure 1D logits
             y_true.append(y.cpu())
@@ -177,9 +181,25 @@ def collect_scores(backbone: FrozenBackboneEncoder, head: nn.Module, loader: Dat
 
 
 def train(cfg: Dict) -> None:
+    # Validate protocol before training
+    validate_wp2_protocol(
+        supervised_csv=Path(cfg["data"]["supervised_csv"]),
+        cross_csv=Path(cfg["data"]["cross_csv"]),
+        label_col=cfg["data"].get("label_col", "quality_label"),
+    )
+
     set_seed(cfg["train"].get("seed", 42))
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    cuda_available = torch.cuda.is_available()
+    device = torch.device("cuda" if cuda_available else "cpu")
     train_loader, val_loader, test_loader, clinical_loader = build_loaders(cfg)
+    # Log CSV stats
+    import pandas as pd
+    sup_df = pd.read_csv(cfg["data"]["supervised_csv"])
+    cross_df = pd.read_csv(cfg["data"]["cross_csv"])
+    print(f"[stats] supervised rows={len(sup_df)} domains={sup_df['domain'].value_counts().to_dict()} splits={sup_df['split'].value_counts().to_dict()}")
+    print(f"[stats] cross rows={len(cross_df)} domains={cross_df['domain'].value_counts().to_dict()} splits={cross_df['split'].value_counts().to_dict()}")
+    print(f"[stats] root_map={cfg['data']['root_map']}")
+
     backbone, head = build_model(cfg, device)
 
     # Sanity on trainable params
@@ -187,10 +207,14 @@ def train(cfg: Dict) -> None:
     total_trainable = sum(p.numel() for p in head_params)
     frozen_params = sum(p.numel() for p in backbone.parameters())
     print(f"[model] frozen params: {frozen_params:,} | trainable head params: {total_trainable:,}")
+    print(
+        f"[data] domains train/val=test: hv_kaggle only | cross-domain: hv_clinical only | label_col={cfg['data'].get('label_col','quality_label')}"
+    )
 
     criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.AdamW(head.parameters(), lr=cfg["train"]["lr"], weight_decay=cfg["train"]["weight_decay"])
-    scaler = torch.amp.GradScaler("cuda", enabled=cfg["train"].get("fp16", False))
+    fp16_enabled = cfg["train"].get("fp16", False) and cuda_available
+    scaler = torch.amp.GradScaler(device_type="cuda", enabled=fp16_enabled)
 
     run_name = cfg.get("logging", {}).get("run_name", "wp2_linear_probe")
     mode = cfg["model"].get("mode", "imagenet")
@@ -209,7 +233,7 @@ def train(cfg: Dict) -> None:
         for x, y in tqdm(train_loader, desc=f"Epoch {epoch}"):
             x = x.to(device, non_blocking=True)
             y = y.to(device, non_blocking=True).view(-1, 1)
-            with torch.amp.autocast("cuda", enabled=cfg["train"].get("fp16", False)):
+            with torch.amp.autocast(device_type="cuda", enabled=fp16_enabled):
                 feats = backbone(x)
                 if not debug_logged and epoch == 1:
                     print(f"[debug] backbone feats shape: {feats.shape}")
@@ -260,6 +284,7 @@ def train(cfg: Dict) -> None:
             "img_size": cfg["data"]["img_size"],
             "supervised_csv": str(cfg["data"]["supervised_csv"]),
             "cross_csv": str(cfg["data"]["cross_csv"]),
+            "label_col": cfg["data"].get("label_col", "quality_label"),
         },
         "threshold": threshold,
         "val_metrics": best_state["val_metrics"],
