@@ -24,6 +24,7 @@ train:
   weight_decay: 1.0e-4
   fp16: true
   seed: 42
+  pos_weight: 5.8
 
 logging:
   run_name: "wp2_linear_probe"

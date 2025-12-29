@@ -199,6 +199,18 @@ def train(cfg: Dict) -> None:
     print(f"[stats] supervised rows={len(sup_df)} domains={sup_df['domain'].value_counts().to_dict()} splits={sup_df['split'].value_counts().to_dict()}")
     print(f"[stats] cross rows={len(cross_df)} domains={cross_df['domain'].value_counts().to_dict()} splits={cross_df['split'].value_counts().to_dict()}")
     print(f"[stats] root_map={cfg['data']['root_map']}")
+    label_col = cfg["data"].get("label_col", "quality_label")
+    for name, df in [("train", sup_df[sup_df["split"] == "train"]), ("val", sup_df[sup_df["split"] == "val"]), ("test", sup_df[sup_df["split"] == "test"]), ("clinical_test", cross_df[cross_df["split"] == "test"])]:
+        if df.empty:
+            print(f"[stats] {name}: 0 samples")
+            continue
+        if label_col not in df.columns:
+            raise ValueError(f"[stats] label_col '{label_col}' missing in {name} split.")
+        vals = df[label_col].dropna().values
+        unique = pd.Series(vals).value_counts().to_dict()
+        print(f"[stats] {name} class balance {unique}")
+        if not set(unique.keys()).issubset({0, 1}):
+            print(f"[warn] {name} split has non-binary labels: {unique.keys()}")
 
     backbone, head = build_model(cfg, device)
 
@@ -211,10 +223,30 @@ def train(cfg: Dict) -> None:
         f"[data] domains train/val=test: hv_kaggle only | cross-domain: hv_clinical only | label_col={cfg['data'].get('label_col','quality_label')}"
     )
 
-    criterion = nn.BCEWithLogitsLoss()
+    # Compute pos_weight for class imbalance if not provided
+    pos_weight_cfg = cfg["train"].get("pos_weight", None)
+    if pos_weight_cfg is None:
+        train_df = sup_df[sup_df["split"] == "train"]
+        pos = float((train_df[label_col] == 1).sum())
+        neg = float((train_df[label_col] == 0).sum())
+        if pos > 0:
+            pos_weight = neg / pos
+        else:
+            pos_weight = 1.0
+        print(f"[loss] auto pos_weight computed from train split: {pos_weight:.4f} (pos={pos}, neg={neg})")
+    else:
+        pos_weight = float(pos_weight_cfg)
+        print(f"[loss] using configured pos_weight={pos_weight}")
+
+    criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weight], device=device))
     optimizer = optim.AdamW(head.parameters(), lr=cfg["train"]["lr"], weight_decay=cfg["train"]["weight_decay"])
     use_amp = cfg["train"].get("fp16", False) and cuda_available
-    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
+    try:
+        scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
+        autocast_ctx = lambda: torch.amp.autocast("cuda", enabled=use_amp)
+    except TypeError:
+        scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
+        autocast_ctx = lambda: torch.cuda.amp.autocast(enabled=use_amp)
 
     run_name = cfg.get("logging", {}).get("run_name", "wp2_linear_probe")
     mode = cfg["model"].get("mode", "imagenet")
@@ -233,7 +265,7 @@ def train(cfg: Dict) -> None:
         for x, y in tqdm(train_loader, desc=f"Epoch {epoch}"):
             x = x.to(device, non_blocking=True)
             y = y.to(device, non_blocking=True).view(-1, 1).float()
-            with torch.cuda.amp.autocast(enabled=use_amp):
+            with autocast_ctx():
                 feats = backbone(x)
                 if not debug_logged and epoch == 1:
                     print(f"[debug] backbone feats shape: {feats.shape}")
