@@ -20,7 +20,7 @@ train:
   epochs: 10
   lr: 1.0e-3
   weight_decay: 1.0e-4
-  fp16: false
+  fp16: true
   seed: 42
 
 logging:
