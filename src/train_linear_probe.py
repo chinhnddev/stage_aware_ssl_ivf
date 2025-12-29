@@ -200,6 +200,7 @@ def train(cfg: Dict) -> None:
 
     best_val = -1.0
     best_state = None
+    debug_logged = False
 
     for epoch in range(1, cfg["train"]["epochs"] + 1):
         head.train()
@@ -210,6 +211,9 @@ def train(cfg: Dict) -> None:
             y = y.to(device, non_blocking=True).view(-1, 1)
             with torch.amp.autocast("cuda", enabled=cfg["train"].get("fp16", False)):
                 feats = backbone(x)
+                if not debug_logged and epoch == 1:
+                    print(f"[debug] backbone feats shape: {feats.shape}")
+                    debug_logged = True
                 logits = head(feats)
                 loss = criterion(logits, y)
             optimizer.zero_grad()

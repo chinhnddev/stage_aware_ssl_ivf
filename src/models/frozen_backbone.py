@@ -42,8 +42,20 @@ class FrozenBackboneEncoder(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         with torch.no_grad():
             feats = self.backbone(x)
-        if feats.dim() == 4 and self.global_pool == "avg":
+        if feats.dim() == 4:
+            # (B, C, H, W) -> global average pool -> (B, C)
             feats = feats.mean(dim=(-2, -1))
+        elif feats.dim() == 3:
+            # (B, N, D) -> mean over tokens -> (B, D)
+            feats = feats.mean(dim=1)
+        elif feats.dim() == 2:
+            # already (B, D), keep as is
+            pass
+        elif feats.dim() == 1:
+            feats = feats.unsqueeze(1)
+            raise ValueError("Backbone output is 1D (B,); expected feature tensor (B, D).")
+        else:
+            raise ValueError(f"Unexpected backbone output shape: {feats.shape}")
         return feats
 
 
