@@ -12,8 +12,8 @@ model:
   mode: "ssl"
   backbone_name: "vit_base_patch16_224"
   pretrained: false
-  ssl_checkpoint: "outputs/ssl_byol_stage/encoder_ssl.pth"
-  from_byol_ckpt: false
+  ssl_checkpoint: "outputs/wp1_ssl_vit/encoder_ssl.pth"
+  from_byol_ckpt: true
 
 
 train:
