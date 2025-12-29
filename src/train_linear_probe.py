@@ -213,8 +213,8 @@ def train(cfg: Dict) -> None:
 
     criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.AdamW(head.parameters(), lr=cfg["train"]["lr"], weight_decay=cfg["train"]["weight_decay"])
-    fp16_enabled = cfg["train"].get("fp16", False) and cuda_available
-    scaler = torch.amp.GradScaler(device_type="cuda", enabled=fp16_enabled)
+    use_amp = cfg["train"].get("fp16", False) and cuda_available
+    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
 
     run_name = cfg.get("logging", {}).get("run_name", "wp2_linear_probe")
     mode = cfg["model"].get("mode", "imagenet")
@@ -232,8 +232,8 @@ def train(cfg: Dict) -> None:
         total_loss = 0.0
         for x, y in tqdm(train_loader, desc=f"Epoch {epoch}"):
             x = x.to(device, non_blocking=True)
-            y = y.to(device, non_blocking=True).view(-1, 1)
-            with torch.amp.autocast(device_type="cuda", enabled=fp16_enabled):
+            y = y.to(device, non_blocking=True).view(-1, 1).float()
+            with torch.cuda.amp.autocast(enabled=use_amp):
                 feats = backbone(x)
                 if not debug_logged and epoch == 1:
                     print(f"[debug] backbone feats shape: {feats.shape}")
