@@ -323,6 +323,49 @@ def main():
     )
     test_metrics = compute_classification_metrics(y_true_test, y_score_test, threshold=threshold)
     clin_metrics = compute_classification_metrics(y_true_clin, y_score_clin, threshold=threshold)
+    # Diagnostics
+    import numpy as np
+
+    def diag(y_true, y_score, name):
+        pos_rate = float(np.mean(y_true))
+        score_mean = float(np.mean(y_score))
+        score_std = float(np.std(y_score))
+        pred_pos_rate = float(np.mean(y_score >= threshold))
+        print(
+            f"[diag] {name}: pos_rate={pos_rate:.4f} score_mean={score_mean:.4f} score_std={score_std:.4f} pred_pos_rate={pred_pos_rate:.4f}"
+        )
+        return {
+            "pos_rate": pos_rate,
+            "score_mean": score_mean,
+            "score_std": score_std,
+            "pred_pos_rate": pred_pos_rate,
+        }
+
+    test_diag = diag(y_true_test, y_score_test, "test_kaggle")
+    clin_diag = diag(y_true_clin, y_score_clin, "test_clinical")
+    test_metrics.update(test_diag)
+    clin_metrics.update(clin_diag)
+
+    # Save raw predictions
+    try:
+        import pandas as pd
+
+        def save_preds(y_true, y_score, split_name, domain, path):
+            df = pd.DataFrame(
+                {
+                    "split": split_name,
+                    "domain": domain,
+                    "y_true": y_true,
+                    "y_score": y_score,
+                    "y_pred": (y_score >= threshold).astype(int),
+                }
+            )
+            df.to_csv(path, index=False)
+
+        save_preds(y_true_test, y_score_test, "test", "hv_kaggle", out_dir / "predictions_kaggle.csv")
+        save_preds(y_true_clin, y_score_clin, "test", "hv_clinical", out_dir / "predictions_clinical.csv")
+    except Exception as e:
+        print(f"[warn] failed to save prediction CSVs: {e}")
 
     summary = {
         "config": cfg,
