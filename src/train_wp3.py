@@ -305,7 +305,12 @@ def main():
     enable_align = cfg["train"].get("enable_domain_align", False) and cfg["wp3"]["gen"].get("use_domain_align", True)
     if not enable_align:
         print("[startup] domain alignment DISABLED for this run; lambda_domain will be ignored.")
-    train_loader, val_loader, test_loader, clin_loader, tgt_loader = build_loaders(cfg)
+    loaders = build_loaders(cfg)
+    if len(loaders) == 5:
+        train_loader, val_loader, test_loader, clin_loader, tgt_loader = loaders
+    else:
+        train_loader, val_loader, test_loader, clin_loader = loaders
+        tgt_loader = None
     train_loader, val_loader, test_loader, clin_loader = build_loaders(cfg)
 
     backbone, composer, head = build_model(cfg, device)
