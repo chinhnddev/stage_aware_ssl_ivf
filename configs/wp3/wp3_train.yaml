@@ -1,0 +1,53 @@
+data:
+  supervised_csv: "data-curation/metadata_supervised.csv"
+  cross_csv: "data-curation/metadata_crossdomain_test_quality.csv"
+  label_col: "quality_label"
+  task: "quality_binary"
+  root_map:
+    hv_kaggle: "/content/data/hv_hospital_day3_day5"
+    hv_clinical: "/content/data/HungVuong_hospital_dataset/Human embryo image datasets"
+  img_size: 224
+  batch_size: 32
+  num_workers: 2
+
+model:
+  mode: "ssl"
+  backbone_name: "vit_base_patch16_224"
+  pretrained: false
+  ssl_checkpoint: "outputs/wp1_ssl_vit/encoder_ssl.pth"
+  from_byol_ckpt: true
+  freeze_backbone: true
+
+wp3:
+  token_dim: 768
+  adapter:
+    use_adapter: true
+    use_domain_token: true
+    use_stage_token: true
+  morph:
+    num_experts: 4
+    num_heads: 4
+    use_sin: true
+  gen:
+    depth: 2
+    num_heads: 4
+    dim_ff: 512
+    use_stage_cross_attn: true
+    use_domain_align: true
+    domain_align_type: "grl"
+    num_domains: 2
+    grl_lambda: 1.0
+
+train:
+  epochs: 20
+  lr: 1.0e-4
+  weight_decay: 1.0e-4
+  fp16: true
+  seed: 42
+  enable_domain_align: false
+  lambda_stage: 0.3
+  lambda_domain: 0.1
+
+logging:
+  run_name: "wp3_stage_aware"
+  out_dir: "outputs/wp3"
