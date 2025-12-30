@@ -311,7 +311,6 @@ def main():
     else:
         train_loader, val_loader, test_loader, clin_loader = loaders
         tgt_loader = None
-    train_loader, val_loader, test_loader, clin_loader = build_loaders(cfg)
 
     backbone, composer, head = build_model(cfg, device)
     if cfg["model"].get("freeze_backbone", True):
