@@ -119,6 +119,10 @@ class DomainStageAdapter(nn.Module):
     ) -> Dict[str, Tensor]:
         tokens = _flatten_tokens(feats)
         tokens = self.adapter(tokens)
+        # Ensure 3D tokens
+        if tokens.dim() == 2:
+            tokens = tokens.unsqueeze(1)  # (B,1,C)
+        assert tokens.dim() == 3, f"tokens must be 3D, got {tokens.shape}"
 
         batch_size = tokens.size(0)
         domain_token: Optional[Tensor] = None
@@ -128,7 +132,10 @@ class DomainStageAdapter(nn.Module):
             if domain_ids is None:
                 raise ValueError("domain_ids required when use_domain_token=True")
             domain_token = self.domain_embed(domain_ids.clamp(min=0, max=self.domain_embed.num_embeddings - 1))
-            domain_token = domain_token.unsqueeze(1)  # (B,1,D)
+            if domain_token.dim() == 2:
+                domain_token = domain_token.unsqueeze(1)  # (B,1,D)
+            assert domain_token.dim() == 3, f"domain_token must be 3D, got {domain_token.shape}"
+            assert domain_token.size(-1) == tokens.size(-1), "domain_token dim mismatch with tokens"
             tokens = torch.cat([domain_token, tokens], dim=1)
 
         if self.use_stage_token:
@@ -140,7 +147,11 @@ class DomainStageAdapter(nn.Module):
                 else:
                     ids.append(self.stage_vocab.get(str(lbl).upper(), unk_id))
             stage_ids = torch.tensor(ids, device=tokens.device, dtype=torch.long)
-            stage_token = self.stage_embed(stage_ids).unsqueeze(1)  # (B,1,D)
+            stage_token = self.stage_embed(stage_ids)
+            if stage_token.dim() == 2:
+                stage_token = stage_token.unsqueeze(1)  # (B,1,D)
+            assert stage_token.dim() == 3, f"stage_token must be 3D, got {stage_token.shape}"
+            assert stage_token.size(-1) == tokens.size(-1), "stage_token dim mismatch with tokens"
             tokens = torch.cat([stage_token, tokens], dim=1)
 
         return {"tokens": tokens, "domain_token": domain_token, "stage_token": stage_token}
