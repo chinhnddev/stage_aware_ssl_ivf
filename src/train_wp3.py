@@ -172,7 +172,10 @@ def build_model(cfg: Dict, device: torch.device) -> Tuple[FrozenBackboneEncoder,
         morph_cfg=wp3cfg.get("morph", {}),
         gen_cfg=wp3cfg.get("gen", {}),
     ).to(device)
-    head = QualityHead(in_dim=wp3cfg.get("token_dim", backbone.feature_dim)).to(device)
+    head = QualityHead(in_dim=composer.out_dim).to(device)
+    print(
+        f"[model] backbone_dim={backbone.feature_dim} token_dim={wp3cfg.get('token_dim', backbone.feature_dim)} fused_dim={composer.out_dim}"
+    )
     return backbone, composer, head
 
 
@@ -196,6 +199,8 @@ def run_epoch(loader, backbone, composer, head, optimizer, criterion, device, sc
         with torch.cuda.amp.autocast(enabled=scaler is not None):
             feats = backbone(imgs)
             fused, aux = composer(feats, domain_ids=domain_ids, stage_labels=stages_list, align=enable_align)
+            assert fused.dim() == 2, f"fused should be 2D, got {fused.shape}"
+            assert fused.size(1) == composer.out_dim, f"fused dim {fused.size(1)} != composer.out_dim {composer.out_dim}"
             logits = head(fused).view(-1, 1)
             loss = criterion(logits, labels)
             if enable_align and "domain_logits" in aux and lambda_domain > 0:

@@ -287,6 +287,8 @@ class WP3FeatureComposer(nn.Module):
         self.adapter = DomainStageAdapter(in_dim=in_dim, token_dim=token_dim, **adapter_cfg)
         self.morph_branch = MorphologicalMoEBranch(token_dim=token_dim, **morph_cfg)
         self.gen_branch = StageDomainGeneralizationBranch(token_dim=token_dim, **gen_cfg)
+        # Fusion concatenates z_m and z_g, each of size token_dim
+        self.out_dim = token_dim * 2
 
     def forward(
         self,
