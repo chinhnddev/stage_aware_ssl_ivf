@@ -53,6 +53,10 @@ class StyleInvariantNorm(nn.Module):
         if orig_dim == 2:
             x = x.unsqueeze(1)  # (B,1,C)
         x_perm = x.transpose(1, 2)  # (B, C, L)
+        # If only one spatial element, skip InstanceNorm to avoid errors.
+        if x_perm.size(-1) == 1:
+            out = self.bnorm(x_perm).transpose(1, 2)
+            return out if orig_dim == 3 else out.squeeze(1)
         nin = self.inorm(x_perm)
         nbn = self.bnorm(x_perm)
         mix = torch.sigmoid(self.alpha)
