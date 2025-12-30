@@ -81,6 +81,7 @@ class StageAwareDataset(Dataset):
         root_map: Dict[str, Path],
         label_col: str,
         transform,
+        use_labels: bool = True,
     ) -> None:
         df = pd.read_csv(csv_path)
         df = df[(df["domain"] == domain) & (df["split"] == split)].reset_index(drop=True)
@@ -104,6 +105,11 @@ class StageAwareDataset(Dataset):
         if domain not in self.DOMAIN2ID:
             raise KeyError(f"domain '{domain}' not in DOMAIN2ID mapping {self.DOMAIN2ID}")
         self.domain_id = self.DOMAIN2ID[domain]
+        if use_labels:
+            labels = pd.to_numeric(df[label_col], errors="coerce").fillna(0).astype(float)
+        else:
+            labels = pd.Series([0.0] * len(df))
+        self.labels = labels.tolist()
 
     def __len__(self) -> int:
         return len(self.paths)
@@ -140,10 +146,27 @@ def build_loaders(cfg: Dict):
     train_tf = _make_transforms(img_size, train=True)
     eval_tf = _make_transforms(img_size, train=False)
 
-    train_ds = StageAwareDataset(sup_csv, "train", "hv_kaggle", root_map, label_col, train_tf)
-    val_ds = StageAwareDataset(sup_csv, "val", "hv_kaggle", root_map, label_col, eval_tf)
-    test_ds = StageAwareDataset(sup_csv, "test", "hv_kaggle", root_map, label_col, eval_tf)
-    clin_ds = StageAwareDataset(cross_csv, "test", "hv_clinical", root_map, label_col, eval_tf)
+    train_ds = StageAwareDataset(sup_csv, "train", "hv_kaggle", root_map, label_col, train_tf, use_labels=True)
+    val_ds = StageAwareDataset(sup_csv, "val", "hv_kaggle", root_map, label_col, eval_tf, use_labels=True)
+    test_ds = StageAwareDataset(sup_csv, "test", "hv_kaggle", root_map, label_col, eval_tf, use_labels=True)
+    clin_ds = StageAwareDataset(cross_csv, "test", "hv_clinical", root_map, label_col, eval_tf, use_labels=True)
+
+    # Target unlabeled loader for UDA (labels ignored)
+    target_csv = Path(data_cfg.get("target_unlabeled_csv", cross_csv))
+    target_ds = None
+    if target_csv.exists():
+        try:
+            target_ds = StageAwareDataset(
+                target_csv,
+                "test" if target_csv == cross_csv else "train",
+                "hv_clinical",
+                root_map,
+                label_col,
+                train_tf,
+                use_labels=False,
+            )
+        except Exception:
+            target_ds = None
 
     def make_loader(ds, shuffle):
         return DataLoader(ds, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, pin_memory=True)
@@ -153,6 +176,7 @@ def build_loaders(cfg: Dict):
         make_loader(val_ds, False),
         make_loader(test_ds, False),
         make_loader(clin_ds, False),
+        make_loader(target_ds, True) if target_ds is not None else None,
     )
 
 
@@ -179,7 +203,20 @@ def build_model(cfg: Dict, device: torch.device) -> Tuple[FrozenBackboneEncoder,
     return backbone, composer, head
 
 
-def run_epoch(loader, backbone, composer, head, optimizer, criterion, device, scaler=None, train=True, enable_align=False, lambda_domain=0.0):
+def run_epoch(
+    loader,
+    backbone,
+    composer,
+    head,
+    optimizer,
+    criterion,
+    device,
+    scaler=None,
+    train=True,
+    enable_align=False,
+    lambda_domain=0.0,
+    target_loader=None,
+):
     if train:
         head.train()
         composer.train()
@@ -191,6 +228,9 @@ def run_epoch(loader, backbone, composer, head, optimizer, criterion, device, sc
     y_true = []
     y_score = []
     domain_loss = torch.tensor(0.0, device=device)
+    domain_acc_count = 0
+    domain_acc_total = 0
+    tgt_iter = iter(target_loader) if (enable_align and target_loader is not None) else None
     for imgs, labels, domain_ids, stages in tqdm(loader, leave=False):
         imgs = imgs.to(device, non_blocking=True)
         labels = labels.to(device, non_blocking=True).view(-1, 1)
@@ -203,12 +243,36 @@ def run_epoch(loader, backbone, composer, head, optimizer, criterion, device, sc
             assert fused.size(1) == composer.out_dim, f"fused dim {fused.size(1)} != composer.out_dim {composer.out_dim}"
             logits = head(fused).view(-1, 1)
             loss = criterion(logits, labels)
-            if enable_align and "domain_logits" in aux and lambda_domain > 0:
-                dom_logits = aux["domain_logits"]
-                dom_targets = domain_ids
-                d_loss = nn.functional.cross_entropy(dom_logits, dom_targets)
-                loss = loss + lambda_domain * d_loss
-                domain_loss = domain_loss + d_loss.detach()
+            dom_loss_step = torch.tensor(0.0, device=device)
+            if enable_align and lambda_domain > 0:
+                dom_logits_list = []
+                dom_targets_list = []
+                if "domain_logits" in aux:
+                    dom_logits_list.append(aux["domain_logits"])
+                    dom_targets_list.append(domain_ids)
+                if tgt_iter is not None:
+                    try:
+                        t_imgs, _, t_domain_ids, t_stages = next(tgt_iter)
+                    except StopIteration:
+                        tgt_iter = iter(target_loader)
+                        t_imgs, _, t_domain_ids, t_stages = next(tgt_iter)
+                    t_imgs = t_imgs.to(device, non_blocking=True)
+                    t_domain_ids = t_domain_ids.to(device, non_blocking=True).long().view(-1)
+                    t_stages_list = list(t_stages)
+                    t_feats = backbone(t_imgs)
+                    _, t_aux = composer(t_feats, domain_ids=t_domain_ids, stage_labels=t_stages_list, align=True)
+                    if "domain_logits" in t_aux:
+                        dom_logits_list.append(t_aux["domain_logits"])
+                        dom_targets_list.append(t_domain_ids)
+                if dom_logits_list:
+                    all_logits = torch.cat(dom_logits_list, dim=0)
+                    all_targets = torch.cat(dom_targets_list, dim=0)
+                    dom_loss_step = nn.functional.cross_entropy(all_logits, all_targets)
+                    loss = loss + lambda_domain * dom_loss_step
+                    domain_loss = domain_loss + dom_loss_step.detach()
+                    preds = all_logits.argmax(dim=1)
+                    domain_acc_count += int((preds == all_targets).sum().item())
+                    domain_acc_total += int(all_targets.numel())
         if train:
             optimizer.zero_grad()
             if scaler:
@@ -224,7 +288,8 @@ def run_epoch(loader, backbone, composer, head, optimizer, criterion, device, sc
     y_true_np = torch.cat(y_true).numpy()
     y_score_np = torch.cat(y_score).numpy()
     avg_loss = total_loss / len(y_true_np)
-    return avg_loss, y_true_np, y_score_np, float(domain_loss)
+    dom_acc = (domain_acc_count / domain_acc_total) if domain_acc_total > 0 else 0.0
+    return avg_loss, y_true_np, y_score_np, float(domain_loss), dom_acc
 
 
 def main():
@@ -240,7 +305,7 @@ def main():
     enable_align = cfg["train"].get("enable_domain_align", False) and cfg["wp3"]["gen"].get("use_domain_align", True)
     if not enable_align:
         print("[startup] domain alignment DISABLED for this run; lambda_domain will be ignored.")
-    train_loader, val_loader, test_loader, clin_loader = build_loaders(cfg)
+    train_loader, val_loader, test_loader, clin_loader, tgt_loader = build_loaders(cfg)
     train_loader, val_loader, test_loader, clin_loader = build_loaders(cfg)
 
     backbone, composer, head = build_model(cfg, device)
@@ -268,11 +333,23 @@ def main():
     enable_align = enable_align
     lambda_domain = cfg["train"].get("lambda_domain", 0.0)
 
+    dom_zero_streak = 0
     for epoch in range(1, cfg["train"]["epochs"] + 1):
-        train_loss, _, _, dom_loss = run_epoch(
-            train_loader, backbone, composer, head, optimizer, criterion, device, scaler=scaler, train=True, enable_align=enable_align, lambda_domain=lambda_domain
+        train_loss, _, _, dom_loss, dom_acc = run_epoch(
+            train_loader,
+            backbone,
+            composer,
+            head,
+            optimizer,
+            criterion,
+            device,
+            scaler=scaler,
+            train=True,
+            enable_align=enable_align,
+            lambda_domain=lambda_domain,
+            target_loader=tgt_loader,
         )
-        val_loss, y_true_val, y_score_val, _ = run_epoch(
+        val_loss, y_true_val, y_score_val, _, _ = run_epoch(
             val_loader, backbone, composer, head, optimizer, criterion, device, scaler=None, train=False, enable_align=False
         )
         th, bal_acc = balanced_acc_threshold(y_true_val, y_score_val)
@@ -282,7 +359,7 @@ def main():
         print(
             "[epoch {e}] train_loss={tl:.4f} val_loss={vl:.4f} "
             "val_auroc={auroc:.4f} val_auprc={auprc:.4f} val_f1={f1:.4f} "
-            "val_acc={acc:.4f} val_bal_acc={bal:.4f} th={th:.3f} val_pos_rate={pr:.3f} dom_loss={dl:.4f}".format(
+            "val_acc={acc:.4f} val_bal_acc={bal:.4f} th={th:.3f} val_pos_rate={pr:.3f} dom_loss={dl:.4f} dom_acc={da:.4f}".format(
                 e=epoch,
                 tl=train_loss,
                 vl=val_loss,
@@ -294,8 +371,16 @@ def main():
                 th=th,
                 pr=val_pos_rate,
                 dl=dom_loss,
+                da=dom_acc,
             )
         )
+        if enable_align:
+            if dom_loss == 0.0:
+                dom_zero_streak += 1
+            else:
+                dom_zero_streak = 0
+            if dom_zero_streak > 1:
+                print("[warn] domain alignment enabled but dom_loss remains 0 for multiple epochs; check wiring/data.")
         if bal_acc > best_bal_acc:
             best_bal_acc = bal_acc
             best_state = {
@@ -315,10 +400,10 @@ def main():
     threshold = best_state["threshold"]
 
     # Eval in-domain test and cross-domain
-    _, y_true_test, y_score_test, _ = run_epoch(
+    _, y_true_test, y_score_test, _, _ = run_epoch(
         test_loader, backbone, composer, head, optimizer, criterion, device, scaler=None, train=False, enable_align=False
     )
-    _, y_true_clin, y_score_clin, _ = run_epoch(
+    _, y_true_clin, y_score_clin, _, _ = run_epoch(
         clin_loader, backbone, composer, head, optimizer, criterion, device, scaler=None, train=False, enable_align=False
     )
     test_metrics = compute_classification_metrics(y_true_test, y_score_test, threshold=threshold)
