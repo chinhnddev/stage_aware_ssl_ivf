@@ -196,7 +196,7 @@ def run_epoch(loader, backbone, composer, head, optimizer, criterion, device, sc
         labels = labels.to(device, non_blocking=True).view(-1, 1)
         domain_ids = domain_ids.to(device, non_blocking=True).long().view(-1)
         stages_list = list(stages)
-        with torch.cuda.amp.autocast(enabled=scaler is not None):
+        with torch.amp.autocast("cuda", enabled=scaler is not None):
             feats = backbone(imgs)
             fused, aux = composer(feats, domain_ids=domain_ids, stage_labels=stages_list, align=enable_align)
             assert fused.dim() == 2, f"fused should be 2D, got {fused.shape}"
@@ -254,7 +254,7 @@ def main():
         weight_decay=cfg["train"]["weight_decay"],
     )
     use_amp = cfg["train"].get("fp16", False) and device.type == "cuda"
-    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
+    scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
     pos_weight = cfg["train"].get("pos_weight", None)
     criterion = nn.BCEWithLogitsLoss(
         pos_weight=torch.tensor([pos_weight], device=device) if pos_weight is not None else None
@@ -278,7 +278,24 @@ def main():
         th, bal_acc = balanced_acc_threshold(y_true_val, y_score_val)
         val_metrics = compute_classification_metrics(y_true_val, y_score_val, threshold=th)
         val_metrics["bal_acc"] = bal_acc
-        print(f"[epoch {epoch}] train_loss={train_loss:.4f} val_loss={val_loss:.4f} val_bal_acc={bal_acc:.4f} th={th:.3f} dom_loss={dom_loss:.4f}")
+        val_pos_rate = float(y_true_val.mean()) if len(y_true_val) else 0.0
+        print(
+            "[epoch {e}] train_loss={tl:.4f} val_loss={vl:.4f} "
+            "val_auroc={auroc:.4f} val_auprc={auprc:.4f} val_f1={f1:.4f} "
+            "val_acc={acc:.4f} val_bal_acc={bal:.4f} th={th:.3f} val_pos_rate={pr:.3f} dom_loss={dl:.4f}".format(
+                e=epoch,
+                tl=train_loss,
+                vl=val_loss,
+                auroc=val_metrics["auroc"],
+                auprc=val_metrics["auprc"],
+                f1=val_metrics["f1"],
+                acc=val_metrics["acc"],
+                bal=bal_acc,
+                th=th,
+                pr=val_pos_rate,
+                dl=dom_loss,
+            )
+        )
         if bal_acc > best_bal_acc:
             best_bal_acc = bal_acc
             best_state = {
