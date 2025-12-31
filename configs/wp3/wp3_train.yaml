@@ -46,7 +46,7 @@ train:
   weight_decay: 1.0e-4
   fp16: true
   seed: 42
-  enable_domain_align: true
+  enable_domain_align: false
   pos_weight: 5.8
   lambda_stage: 0.3
   lambda_domain: 0.1
