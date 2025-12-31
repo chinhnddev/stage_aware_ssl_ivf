@@ -7,6 +7,7 @@ data:
     hv_kaggle: "/content/data/hv_hospital_day3_day5"
     hv_clinical: "/content/data/HungVuong_hospital_dataset/Human embryo image datasets"
   target_unlabeled_csv: "data-curation/metadata_crossdomain_test_quality.csv"
+  only_dataset_ids: ["ED3"]
   img_size: 224
   batch_size: 32
   num_workers: 2
