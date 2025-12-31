@@ -82,18 +82,9 @@ class StageAwareDataset(Dataset):
         label_col: str,
         transform,
         use_labels: bool = True,
-        dataset_ids: Optional[List[str]] = None,
     ) -> None:
         df = pd.read_csv(csv_path)
         df = df[(df["domain"] == domain) & (df["split"] == split)].reset_index(drop=True)
-        if dataset_ids is not None:
-            ds_list = [d.upper() for d in dataset_ids]
-            before = len(df)
-            df = df[df["dataset_id"].astype(str).str.upper().isin(ds_list)].reset_index(drop=True)
-            print(
-                f"[dataset-filter] {csv_path.name} split={split} domain={domain} keep dataset_id in {ds_list}: "
-                f"{len(df)}/{before} samples"
-            )
         if len(df) == 0:
             raise ValueError(f"No samples for split={split} domain={domain} in {csv_path}")
         paths: List[Optional[Path]] = []
@@ -144,7 +135,6 @@ def build_loaders(cfg: Dict):
     img_size = data_cfg["img_size"]
     batch_size = data_cfg.get("batch_size", 32)
     num_workers = data_cfg.get("num_workers", 2)
-    dataset_ids = data_cfg.get("only_dataset_ids", None)
     root_map = {k: Path(v) for k, v in data_cfg["root_map"].items()}
     for k, v in root_map.items():
         if not v.exists():
@@ -156,10 +146,10 @@ def build_loaders(cfg: Dict):
     train_tf = _make_transforms(img_size, train=True)
     eval_tf = _make_transforms(img_size, train=False)
 
-    train_ds = StageAwareDataset(sup_csv, "train", "hv_kaggle", root_map, label_col, train_tf, use_labels=True, dataset_ids=dataset_ids)
-    val_ds = StageAwareDataset(sup_csv, "val", "hv_kaggle", root_map, label_col, eval_tf, use_labels=True, dataset_ids=dataset_ids)
-    test_ds = StageAwareDataset(sup_csv, "test", "hv_kaggle", root_map, label_col, eval_tf, use_labels=True, dataset_ids=dataset_ids)
-    clin_ds = StageAwareDataset(cross_csv, "test", "hv_clinical", root_map, label_col, eval_tf, use_labels=True, dataset_ids=dataset_ids)
+    train_ds = StageAwareDataset(sup_csv, "train", "hv_kaggle", root_map, label_col, train_tf, use_labels=True)
+    val_ds = StageAwareDataset(sup_csv, "val", "hv_kaggle", root_map, label_col, eval_tf, use_labels=True)
+    test_ds = StageAwareDataset(sup_csv, "test", "hv_kaggle", root_map, label_col, eval_tf, use_labels=True)
+    clin_ds = StageAwareDataset(cross_csv, "test", "hv_clinical", root_map, label_col, eval_tf, use_labels=True)
 
     # Target unlabeled loader for UDA (labels ignored)
     target_csv = Path(data_cfg.get("target_unlabeled_csv", cross_csv))
@@ -174,7 +164,6 @@ def build_loaders(cfg: Dict):
                 label_col,
                 train_tf,
                 use_labels=False,
-                dataset_ids=dataset_ids,
             )
         except Exception:
             target_ds = None
